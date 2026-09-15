@@ -1,0 +1,30 @@
+# dados de execução — banco, uploads, pid/ports/logs do serviço
+data/
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.log
+
+# dependências (o projeto usa só Node embutido, mas se um dia houver)
+node_modules/
+
+# segredos / ambiente / infra local — NUNCA commitar
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+config.yml
+config.yaml
+*tunnel*.json
+.cert/
+.cloudflared/
+
+# SO / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~

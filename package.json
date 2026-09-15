@@ -1,0 +1,15 @@
+{
+  "name": "peso-tracker",
+  "version": "1.0.0",
+  "description": "Painel privado de acompanhamento de peso corporal + estimativa de TMB",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "init-admin": "node server.js --init-admin"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

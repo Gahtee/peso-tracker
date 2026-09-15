@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Peso Tracker</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%235e6ad2'/%3E%3Cpath d='M16 7v13m0 0l-5-5m5 5l5-5M8 24h16' stroke='white' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<!-- LOGIN -->
+<section id="login" class="hidden">
+  <div class="login-inner">
+    <div class="login-logo"><span class="mark"></span>Peso Tracker</div>
+    <h1>Entre na sua conta</h1>
+    <p class="login-sub">Acesso privado. Após 5 tentativas incorretas a conta bloqueia temporariamente.</p>
+    <label class="lbl">Usuário
+      <input id="l-user" autocomplete="username" maxlength="32" placeholder="seu usuário" spellcheck="false">
+    </label>
+    <label class="lbl">Senha
+      <input id="l-pass" type="password" autocomplete="current-password" placeholder="••••••••••••">
+    </label>
+    <button id="l-btn" class="btn-primary btn-block">Entrar</button>
+    <p id="l-err" class="err"></p>
+  </div>
+</section>
+
+<!-- APP SHELL -->
+<section id="app" class="hidden">
+  <aside class="side">
+    <div class="side-top">
+      <span class="ws"><span class="mark"></span><span class="ws-name">Peso Tracker</span></span>
+      <span id="userbox" class="userbox"></span>
+    </div>
+    <nav class="side-nav" id="sidenav">
+      <button data-view="overview" class="active"><i>◈</i><span class="txt">Visão geral</span></button>
+      <button data-view="entries"><i>▤</i><span class="txt">Registros</span><span class="count" id="nav-count"></span></button>
+      <button data-view="compare"><i>◐</i><span class="txt">Antes / Depois</span></button>
+      <button data-view="admin" id="nav-admin" class="hidden"><i>⚙</i><span class="txt">Usuários</span></button>
+    </nav>
+    <div class="side-foot">
+      <button id="new-day" class="btn-primary btn-block">+ Novo dia</button>
+      <button id="out" class="btn-quiet btn-block">Sair</button>
+    </div>
+  </aside>
+
+  <div class="maincol">
+    <header class="topbar">
+      <span class="crumb" id="crumb">Visão geral</span>
+      <span class="topbar-right"><input id="q" class="search" placeholder="Filtrar por data, nota…" spellcheck="false"></span>
+    </header>
+
+    <main class="content">
+      <!-- VISÃO GERAL -->
+      <div id="view-overview" class="view">
+        <div class="panel" id="stats-card">
+          <div class="panel-head">
+            <div><p class="kicker">Metabolismo</p><h2>Estimativa de TMB</h2></div>
+            <span class="pill" id="conf-pill">—</span>
+          </div>
+          <div id="stats"><span class="muted">carregando…</span></div>
+          <p class="muted small method" id="metodo"></p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div><p class="kicker">Tendência</p><h2>Evolução do peso</h2></div>
+          </div>
+          <canvas id="chart" width="900" height="280"></canvas>
+          <p class="muted small legend"><span class="dot dot-ok"></span>normal &nbsp; <span class="dot dot-flag"></span>atípico</p>
+        </div>
+      </div>
+
+      <!-- REGISTROS -->
+      <div id="view-entries" class="view hidden">
+        <div class="panel pad0">
+          <div class="list-head">
+            <span class="col-id">Data</span>
+            <span class="col-w">Peso</span>
+            <span class="col-c">kcal</span>
+            <span class="col-n">Nota / contexto</span>
+            <span class="col-m">Mídia</span>
+          </div>
+          <div id="entries"></div>
+        </div>
+      </div>
+
+      <!-- ANTES / DEPOIS -->
+      <div id="view-compare" class="view hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <div><p class="kicker">Comparar</p><h2>Antes / Depois</h2></div>
+          </div>
+          <div class="cmp-ctl">
+            <label class="lbl">De<select id="cmp-a"></select></label>
+            <label class="lbl">Para<select id="cmp-b"></select></label>
+            <button id="cmp-btn" class="btn-ghost">Comparar</button>
+          </div>
+          <div id="cmp" class="cmp"></div>
+        </div>
+      </div>
+
+      <!-- ADMIN -->
+      <div id="view-admin" class="view hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <div><p class="kicker">Admin</p><h2>Usuários</h2></div>
+          </div>
+          <p class="muted small">Só o administrador cria perfis. Senha mínima de 12 caracteres.</p>
+          <div class="cmp-ctl">
+            <label class="lbl">Usuário<input id="a-user" maxlength="32" placeholder="ex: maria" spellcheck="false"></label>
+            <label class="lbl">Senha<input id="a-pass" type="password" autocomplete="new-password" placeholder="mínimo 12 caracteres"></label>
+            <label class="lbl">Papel<select id="a-role"><option value="user">user</option><option value="admin">admin</option></select></label>
+            <button id="a-btn" class="btn-ghost">Criar perfil</button>
+          </div>
+          <p id="a-err" class="err"></p>
+          <div id="users" class="table-wrap"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</section>
+
+<!-- MODAL NOVO DIA -->
+<dialog id="dlg-day">
+  <form method="dialog" class="dlg" id="day-form">
+    <p class="kicker">Registro</p>
+    <h2>Novo dia</h2>
+    <div class="row3">
+      <label class="lbl">Data<input id="f-day" type="date" required></label>
+      <label class="lbl">Peso (kg)<input id="f-weight" type="number" step="0.1" min="20" max="500" inputmode="decimal" placeholder="82.4" required></label>
+      <label class="lbl">Calorias<input id="f-cal" type="number" step="1" min="0" max="30000" inputmode="numeric" placeholder="2300" required></label>
+    </div>
+    <label class="lbl">Nota<input id="f-note" maxlength="500" placeholder="Como foi o dia? (opcional)"></label>
+    <label class="lbl">Foto / vídeo <span class="muted">— jpg png webp gif mp4 webm, 15 MB</span>
+      <input id="f-media" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm" multiple>
+    </label>
+    <fieldset id="f-flags" class="flags"><legend>Dia atípico? <span class="muted">— pondera menos no cálculo</span></legend></fieldset>
+    <p id="f-err" class="err"></p>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn-ghost" formnovalidate>Cancelar</button>
+      <button id="f-btn" value="default" class="btn-primary">Salvar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- MODAL EDITAR DIA -->
+<dialog id="dlg-edit">
+  <form method="dialog" class="dlg" id="edit-form">
+    <p class="kicker">Registro</p>
+    <h2>Editar dia <span class="muted" id="e-day"></span></h2>
+    <div class="row3">
+      <label class="lbl">Peso (kg)<input id="e-weight" type="number" step="0.1" min="20" max="500" required></label>
+      <label class="lbl">Calorias<input id="e-cal" type="number" step="1" min="0" max="30000" required></label>
+    </div>
+    <label class="lbl">Nota<input id="e-note" maxlength="500"></label>
+    <fieldset id="e-flags" class="flags"><legend>Dia atípico?</legend></fieldset>
+    <p id="e-err" class="err"></p>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn-ghost" formnovalidate>Cancelar</button>
+      <button id="e-btn" value="default" class="btn-primary">Salvar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="lightbox"><img id="lb-img" alt=""><br><button id="lb-close" class="btn-ghost">Fechar</button></dialog>
+<script src="/app.js"></script>
+</body>
+</html>
