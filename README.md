@@ -11,7 +11,11 @@ Zero dependências — apenas **Node.js ≥ 22** (usa `node:sqlite` embutido).
 
 ## Funcionalidades
 
-- Registro diário: data, peso, calorias, **exercício (kcal + fonte: estimativa/relógio/não sei)**, nota + flags de dia atípico (inclui ciclo)
+- Registro diário (convenção peso-manhã × calorias-véspera): **data = manhã
+  da pesagem** (ao acordar, após a 1ª urina: peso + foto); **calorias e
+  exercício = total do dia anterior**. De manhã você pesa e fecha as calorias
+  de ontem — não dá para prever o que ainda vai comer hoje. Inclui fonte do
+  exercício (estimativa/relógio/não sei), nota + flags de dia atípico (inclui ciclo)
 - Estimativa de TMB/gasto por regressão ponderada sobre **calorias líquidas**
   (ingeridas − exercício), com faixa de confiança IC95%, tendência kg/sem, R²
 - Janela de cálculo (tudo / 28d / 14d), média móvel 7d no gráfico, detecção de

@@ -477,8 +477,15 @@ function validExerciseSrc(v) {
 }
 
 // ---------------- estimativa TMB ----------------
-// Modelo: regressão LINEAR PONDERADA do peso × tempo sobre calorias LÍQUIDAS
-// (ingeridas − exercício), com os MESMOS pesos nos dois lados do balanço.
+// CONVENÇÃO DE REGISTRO (fisiologia da pesagem):
+// - `day` = dia da PESAGEM, de manhã ao acordar após a 1ª urina (peso + foto/vídeo);
+// - `calories`/`exercise_kcal` do MESMO registro = total ingerido/gasto na VÉSPERA
+//   (dia anterior completo). Não dá para prever o que ainda vai comer hoje, então
+//   o fluxo é: de manhã pesa + fotografa, e fecha as calorias de ontem.
+// - Modelo: regressão LINEAR PONDERADA do peso × tempo sobre calorias LÍQUIDAS
+//   da véspera (ingeridas − exercício), com os MESMOS pesos nos dois lados.
+//   O deslocamento de 1 dia entre pesagem e ingestão não viesam a média: a série
+//   de N manhãs cobre N vésperas, e a tendência kg/dia absorve o ruído hídrico.
 // - dias normais têm peso 1; dias atípicos entram com peso menor (0.3–0.5);
 // - gasto = média_ponderada(cal − exercício) − tendência(kg/dia) × 7700;
 // - TMB ≈ gasto ÷ fator de atividade do perfil (padrão 1.2 sedentário);
@@ -666,7 +673,7 @@ function statsFor(userId, windowDays = 0) {
     plausivel: gasto > 800 && gasto < 8000,
     goal, ciclo,
     trajetoria: traj, projecao: proj,
-    metodo: `Regressão ponderada em ${n} dias${windowDays ? ` (janela ${windowDays})` : ""} (${flagged} atípico(s), n efetivo ${effN}): gasto = média ponderada das calorias líquidas (ingeridas − exercício) − (tendência × ${KCAL_PER_KG}); TMB ≈ gasto ÷ ${ACT} (fator de atividade do perfil). Margem = IC95% da balança (±${margemTmb})${margemEx > 0 ? ` + incerteza do exercício (±${margemEx}, ~25% do treino estimado)` : ""}. Marcar dias atípicos estreita a margem.${profile.cycle_enabled ? " Ciclo ativo: dias de retenção ponderam metade automaticamente." : ""}`
+    metodo: `Cada dia = pesagem de manhã (após a 1ª urina) + calorias/exercício da VÉSPERA. Regressão ponderada em ${n} dias${windowDays ? ` (janela ${windowDays})` : ""} (${flagged} atípico(s), n efetivo ${effN}): gasto = média ponderada das calorias líquidas (ingeridas − exercício) − (tendência × ${KCAL_PER_KG}); TMB ≈ gasto ÷ ${ACT} (fator de atividade do perfil). Margem = IC95% da balança (±${margemTmb})${margemEx > 0 ? ` + incerteza do exercício (±${margemEx}, ~25% do treino estimado)` : ""}. Marcar dias atípicos estreita a margem.${profile.cycle_enabled ? " Ciclo ativo: dias de retenção ponderam metade automaticamente." : ""}`
   };
 }
 

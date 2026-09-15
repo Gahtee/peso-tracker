@@ -87,9 +87,9 @@
             <a class="btn-ghost" id="csv-btn" href="/api/export.csv" download>Exportar CSV</a>
           </div>
           <div class="list-head">
-            <span class="col-id">Data</span>
-            <span class="col-w">Peso</span>
-            <span class="col-c">kcal</span>
+            <span class="col-id" title="Manhã em que subiu na balança (após a 1ª urina)">Data · pesagem</span>
+            <span class="col-w" title="Peso de manhã, ao acordar">Peso manhã</span>
+            <span class="col-c" title="Total ingerido no dia anterior (véspera)">kcal ontem</span>
             <span class="col-n">Nota / contexto</span>
             <span class="col-m">Mídia</span>
           </div>
@@ -148,7 +148,7 @@
           <div class="panel-head">
             <div><p class="kicker">Trajetória</p><h2>Peso esperado x real</h2></div>
           </div>
-          <p class="muted small">Esperado = reta ajustada (tendência sem o ruído do dia). Use para saber se o peso de hoje está dentro do previsto ou se foi água/balança.</p>
+          <p class="muted small">Esperado = reta ajustada (tendência sem o ruído do dia). Cada linha cruza a <b>pesagem da manhã</b> com as <b>calorias da véspera</b>. Use para saber se o peso de hoje está dentro do previsto ou se foi água/balança.</p>
           <div id="forecast-box"></div>
         </div>
         <div class="panel">
@@ -186,17 +186,18 @@
     <p class="kicker">Registro</p>
     <h2>Novo dia</h2>
     <div class="row3">
-      <label class="lbl">Data<input id="f-day" type="date" required></label>
-      <label class="lbl">Peso (kg)<input id="f-weight" type="number" step="0.1" min="20" max="500" inputmode="decimal" placeholder="82.4" required></label>
-      <label class="lbl">Calorias<input id="f-cal" type="number" step="1" min="0" max="30000" inputmode="numeric" placeholder="2300" required></label>
+      <label class="lbl">Data · dia da pesagem<input id="f-day" type="date" required></label>
+      <label class="lbl">Peso de manhã (kg)<input id="f-weight" type="number" step="0.1" min="20" max="500" inputmode="decimal" placeholder="82.4" required></label>
+      <label class="lbl">Calorias de ontem<input id="f-cal" type="number" step="1" min="0" max="30000" inputmode="numeric" placeholder="2300" required></label>
     </div>
+    <p class="muted small">Como registrar: de manhã, ao acordar após a 1ª urina, pese-se + tire a foto — e feche aqui as <b>calorias e o exercício de ontem</b> (dia anterior completo). Não dá para prever o que ainda vai comer hoje.</p>
     <div class="row3">
-      <label class="lbl">Exercício (kcal)<input id="f-ex" type="number" step="1" min="0" max="10000" inputmode="numeric" placeholder="0"></label>
+      <label class="lbl">Exercício de ontem (kcal)<input id="f-ex" type="number" step="1" min="0" max="10000" inputmode="numeric" placeholder="0"></label>
       <label class="lbl">Medida do exercício<select id="f-exsrc"><option value="est">Estimativa</option><option value="dev">Relógio/app</option><option value="nao">Não sei / chute</option></select></label>
     </div>
     <p class="muted small">O gasto do treino nunca é exato (relógio erra ~25%). Estimativas e chutes alargam a margem de erro da TMB; medida de aparelho, não. Em branco = 0 (subestima o gasto de quem treina sem anotar).</p>
     <label class="lbl">Nota<input id="f-note" maxlength="500" placeholder="Como foi o dia? (opcional)"></label>
-    <label class="lbl">Foto / vídeo <span class="muted">— jpg png webp gif mp4 webm, 15 MB</span>
+    <label class="lbl">Foto / vídeo da pesagem <span class="muted">— jpg png webp gif mp4 webm, 15 MB</span>
       <input id="f-media" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm" multiple>
     </label>
     <fieldset id="f-flags" class="flags"><legend>Dia atípico? <span class="muted">— pondera menos no cálculo</span></legend></fieldset>
@@ -214,9 +215,9 @@
     <p class="kicker">Registro</p>
     <h2>Editar dia <span class="muted" id="e-day"></span></h2>
     <div class="row3">
-      <label class="lbl">Peso (kg)<input id="e-weight" type="number" step="0.1" min="20" max="500" required></label>
-      <label class="lbl">Calorias<input id="e-cal" type="number" step="1" min="0" max="30000" required></label>
-      <label class="lbl">Exercício (kcal)<input id="e-ex" type="number" step="1" min="0" max="10000"></label>
+      <label class="lbl">Peso de manhã (kg)<input id="e-weight" type="number" step="0.1" min="20" max="500" required></label>
+      <label class="lbl">Calorias de ontem<input id="e-cal" type="number" step="1" min="0" max="30000" required></label>
+      <label class="lbl">Exercício de ontem (kcal)<input id="e-ex" type="number" step="1" min="0" max="10000"></label>
       <label class="lbl">Medida<select id="e-exsrc"><option value="est">Estimativa</option><option value="dev">Relógio/app</option><option value="nao">Não sei / chute</option></select></label>
     </div>
     <label class="lbl">Nota<input id="e-note" maxlength="500"></label>

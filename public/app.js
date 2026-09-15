@@ -219,7 +219,7 @@ function renderStats(s) {
     <div class="range-lbl"><span>${s.tmbMin}</span><span>faixa de confiança 95%</span><span>${s.tmbMax}</span></div>
     <div class="props">
       <div class="prop"><small>Gasto diário</small><b>${s.gastoDiario}</b><span>${s.gastoMin}–${s.gastoMax} · ×${s.atividade}</span></div>
-      <div class="prop"><small>Média líquida</small><b>${s.avgLiquidas}</b><span>${s.avgCalories} ingeridas − ${s.avgExercicio} exercício</span></div>
+      <div class="prop"><small>Média líquida (véspera)</small><b>${s.avgLiquidas}</b><span>${s.avgCalories} ingeridas − ${s.avgExercicio} exercício</span></div>
       <div class="prop"><small>Tendência</small><b>${s.slopeKgDay > 0 ? "+" : ""}${trend} kg/sem</b><span>total ${dSign}${s.deltaKg} kg</span></div>
       <div class="prop"><small>Ruído típico</small><b>±${s.residuoTipicoKg} kg</b><span>R² ${s.r2} · n efetivo ${s.diasEfetivos}</span></div>
     </div>
@@ -346,7 +346,7 @@ function renderEntries(entries) {
     <div class="rowline" data-id="${e.id}">
       <span class="rid">${esc(e.day)}</span>
       <span class="rw">${esc(e.weight_kg)} kg</span>
-      <span class="rc">${esc(e.calories)}</span>
+      <span class="rc" title="calorias da véspera (dia anterior)">${esc(e.calories)}</span>
       <span class="rn">${note}${at}</span>
       <span class="rm">${thumbs}
         <span class="ract">
@@ -388,7 +388,7 @@ function detailHtml(e) {
   }).join("");
   const liq = (e.calories | 0) - (e.exercise_kcal | 0);
   return `<div class="detail" data-id="${e.id}">
-    <div class="small" style="color:var(--mut)">Líquidas: <b style="color:var(--ink2)">${liq} kcal</b> (${e.calories} − ${e.exercise_kcal | 0} exercício)</div>
+    <div class="small" style="color:var(--mut)">Pesagem ${esc(e.day)} de manhã · líquidas da véspera: <b style="color:var(--ink2)">${liq} kcal</b> (${e.calories} ingeridas − ${e.exercise_kcal | 0} exercício)</div>
     ${(e.flags | 0) ? `<div class="flag-list">${esc(flagNames(e.flags).join(" · "))}</div>` : ""}
     ${e.note ? `<div class="small" style="color:var(--ink2)">${esc(e.note)}</div>` : ""}
     <div class="thumbs">${items || '<span class="muted small">Sem mídia neste dia.</span>'}</div>
