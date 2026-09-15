@@ -39,7 +39,7 @@ const BIND = process.env.BIND || "127.0.0.1";
 const TRUST_PROXY = (process.env.TRUST_PROXY || "1") === "1"; // cloudflared envia X-Forwarded-For/Proto
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const KCAL_PER_KG = 7700;
-const SEDENTARY_FACTOR = 1.2; // gasto sedentário ≈ TMB * 1.2
+const SEDENTARY_FACTOR = 1.2; // padrão do fator de atividade (perfil pode mudar)
 
 // Flags de "dia atípico": a balança oscila ±1–2 kg por água/glicogênio/conteúdo
 // intestinal sem que isso seja gordura. Dias marcados entram no cálculo com
@@ -51,16 +51,16 @@ const FLAGS = {
   alcool:  { bit: 8,  label: "Álcool no dia anterior",          w: 0.4 },
   horario: { bit: 16, label: "Pesagem em horário diferente",    w: 0.5 },
   treino:  { bit: 32, label: "Fez exercício neste dia",         w: 0.3 },
+  ciclo:   { bit: 128, label: "Período menstrual / TPM",         w: 0.5 },
   outro:   { bit: 64, label: "Outro motivo atípico",            w: 0.5 },
 };
 function parseFlags(v) {
-  if (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 127) return v;
+  if (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 255) return v;
   if (!Array.isArray(v)) return 0;
   let f = 0;
   for (const k of v) if (FLAGS[k]) f |= FLAGS[k].bit;
   return f;
 }
-function flagKeys(f) { return Object.keys(FLAGS).filter((k) => (f & FLAGS[k].bit)); }
 function dayWeight(f) {
   let w = 1;
   for (const k of Object.keys(FLAGS)) if (f & FLAGS[k].bit) w = Math.min(w, FLAGS[k].w);
@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS entries (
   day TEXT NOT NULL,
   weight_kg REAL NOT NULL,
   calories INTEGER NOT NULL,
+  exercise_kcal INTEGER NOT NULL DEFAULT 0,
+  exercise_src TEXT NOT NULL DEFAULT 'est',
   flags INTEGER NOT NULL DEFAULT 0,
   note TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
@@ -127,10 +129,65 @@ CREATE TABLE IF NOT EXISTS audit (
   event TEXT NOT NULL,
   detail TEXT NOT NULL DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at);
+CREATE TABLE IF NOT EXISTS profile (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  goal_kg REAL,
+  goal_day TEXT,
+  activity REAL NOT NULL DEFAULT 1.2,
+  cycle_enabled INTEGER NOT NULL DEFAULT 0,
+  cycle_last TEXT,
+  cycle_len INTEGER NOT NULL DEFAULT 28,
+  updated_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS cycle_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(user_id, day)
+);
+CREATE INDEX IF NOT EXISTS idx_cycle_events_user ON cycle_events(user_id, day);
 `);
 
-// migração: coluna flags em bancos criados antes dessa versão
+// migração: colunas de versões anteriores
 try { db.exec("ALTER TABLE entries ADD COLUMN flags INTEGER NOT NULL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE entries ADD COLUMN exercise_kcal INTEGER NOT NULL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE entries ADD COLUMN exercise_src TEXT NOT NULL DEFAULT 'est'"); } catch {}
+try { db.exec("ALTER TABLE profile ADD COLUMN cycle_enabled INTEGER NOT NULL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE profile ADD COLUMN cycle_last TEXT"); } catch {}
+try { db.exec("ALTER TABLE profile ADD COLUMN cycle_len INTEGER NOT NULL DEFAULT 28"); } catch {}
+
+// ---------------- ciclo menstrual ----------------
+// Efeitos documentados (valores típicos de literatura/revisões):
+// - fase lútea (pós-ovulação até menstruação): TMB sobe ~5–10% (usa-se +7%,
+//   progesterona eleva gasto de repouso); apetite/cravings aumentam;
+// - menstruação + dias anteriores: retenção hídrica de +0.5 a +2 kg na balança
+//   SEM ser gordura — dias nessa janela entram no cálculo com peso menor e
+//   NÃO disparam alerta de outlier nem contam como "fora do ritmo" da meta.
+// Fases estimadas a partir do 1º dia da última menstruação + duração do ciclo:
+//   menstrual: dias 1–5 · folicular: 6–(ov-2) · ovulatória: (ov-2)–(ov+1) ·
+//   lútea: (ov+2)–fim, com ovulação ≈ len−14.
+function cyclePhase(cycProf, dayStr) {
+  if (!cycProf || !cycProf.cycle_enabled || !cycProf.cycle_last) return null;
+  const len = Math.min(45, Math.max(20, cycProf.cycle_len || 28));
+  const t0 = new Date(cycProf.cycle_last + "T12:00:00Z").getTime();
+  const t = new Date(dayStr + "T12:00:00Z").getTime();
+  if (Number.isNaN(t0) || Number.isNaN(t)) return null;
+  const diff = Math.floor((t - t0) / 86400000);
+  if (diff < 0) return null;
+  const d = (diff % len) + 1; // dia do ciclo 1..len
+  const ov = len - 14;
+  let fase, retencao = false, tmbFator = 1;
+  if (d <= 5) { fase = "menstrual"; retencao = true; }
+  else if (d <= Math.max(6, ov - 2)) { fase = "folicular"; }
+  else if (d <= ov + 1) { fase = "ovulatoria"; }
+  else { fase = "lutea"; tmbFator = 1.07; }
+  // TPM: 3 dias antes da próxima menstruação também retêm líquido
+  if (d > len - 3) retencao = true;
+  return { dia: d, duracao: len, fase, retencao, tmbFator };
+}
+const FASE_LABEL = { menstrual: "Menstrual", folicular: "Folicular", ovulatoria: "Ovulatória", lutea: "Lútea" };
 
 // ---------------- crypto / senhas ----------------
 function hashPassword(password, salt = crypto.randomBytes(32)) {
@@ -149,7 +206,12 @@ function validPassword(p) {
   return typeof p === "string" && p.length >= 12 && p.length <= 128;
 }
 function audit(ip, actor, event, detail = "") {
-  try { db.prepare("INSERT INTO audit(at,ip,actor,event,detail) VALUES(?,?,?,?,?)").run(Date.now(), ip, actor, event, String(detail).slice(0, 500)); } catch {}
+  try {
+    db.prepare("INSERT INTO audit(at,ip,actor,event,detail) VALUES(?,?,?,?,?)").run(Date.now(), ip, actor, event, String(detail).slice(0, 500));
+    // rotação: mantém só os últimos 5000 eventos
+    const n = db.prepare("SELECT COUNT(*) c FROM audit").get().c;
+    if (n > 5500) db.prepare("DELETE FROM audit WHERE id <= (SELECT MIN(id) + (? - 5000) FROM audit)").run(n);
+  } catch {}
 }
 
 // ---------------- rate limit / lockout ----------------
@@ -291,8 +353,18 @@ function json(res, code, obj, req) {
 function readJson(req, maxBytes = 32 * 1024) {
   return new Promise((resolve, reject) => {
     let n = 0; const chunks = [];
-    req.on("data", (c) => { n += c.length; if (n > maxBytes) { reject(new Error("payload grande")); req.destroy(); } else chunks.push(c); });
-    req.on("end", () => { try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}); } catch { reject(new Error("JSON inválido")); } });
+    let tooBig = false;
+    req.on("data", (c) => {
+      if (tooBig) return;
+      n += c.length;
+      if (n > maxBytes) { tooBig = true; reject(Object.assign(new Error("payload grande"), { code: 413 })); }
+      else chunks.push(c);
+    });
+    req.on("end", () => {
+      if (tooBig) return;
+      try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}); }
+      catch { reject(Object.assign(new Error("JSON inválido"), { code: 400 })); }
+    });
     req.on("error", reject);
   });
 }
@@ -396,28 +468,69 @@ function validDay(s) {
   return d <= today && d.getFullYear() >= 2000;
 }
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function validExercise(v) {
+  const n = Number(v ?? 0);
+  return Number.isInteger(n) && n >= 0 && n <= 10000 ? n : null;
+}
+function validExerciseSrc(v) {
+  return v === "dev" || v === "nao" ? v : "est";
+}
 
 // ---------------- estimativa TMB ----------------
-// Modelo: regressão LINEAR PONDERADA do peso × tempo.
-// - dias normais têm peso 1; dias atípicos (água/inchaço/jantar/alcool…)
-//   entram com peso menor (0.3–0.5) em vez de serem descartados;
-// - gasto = média(calorias) − tendência(kg/dia) × 7700;
-// - TMB ≈ gasto ÷ 1.2 (sedentário, sem exercício — dia com flag "treino"
-//   também recebe peso menor porque o gasto real foge da hipótese);
-// - margem de erro: IC95% da tendência. O ruído é estimado só com os dias
-//   NORMAIS (não marcados): marcar um dia como atípico reduz a influência
-//   dele no ajuste E estreita a margem; deixar o outlier sem marcar alarga
-//   a margem. Resíduo típico diário é reportado à parte.
-function statsFor(userId) {
-  const rows = db.prepare("SELECT day, weight_kg, calories, flags FROM entries WHERE user_id=? ORDER BY day ASC").all(userId);
-  if (rows.length < 2) {
-    return { n: rows.length, ready: false, message: "Adicione pelo menos 2 dias para estimar a TMB." };
+// Modelo: regressão LINEAR PONDERADA do peso × tempo sobre calorias LÍQUIDAS
+// (ingeridas − exercício), com os MESMOS pesos nos dois lados do balanço.
+// - dias normais têm peso 1; dias atípicos entram com peso menor (0.3–0.5);
+// - gasto = média_ponderada(cal − exercício) − tendência(kg/dia) × 7700;
+// - TMB ≈ gasto ÷ fator de atividade do perfil (padrão 1.2 sedentário);
+// - margem: IC95% da tendência; ruído estimado só com dias NORMAIS, então
+//   marcar um dia como atípico reduz a influência dele E estreita a margem;
+// - window: usa só os últimos N dias (14/28/tudo);
+// - outliers (|resíduo| > 2.5σ) são reportados p/ considerar marcar;
+// - projeção de meta: quando o peso-alvo chega no ritmo atual, e quantas
+//   kcal/dia permitem chegar lá até o dia-alvo.
+const ACTIVITY_LEVELS = [1.2, 1.375, 1.55, 1.725];
+function getProfile(userId) {
+  let p = db.prepare("SELECT * FROM profile WHERE user_id=?").get(userId);
+  if (!p) {
+    db.prepare("INSERT INTO profile(user_id,activity,updated_at) VALUES(?,1.2,?)").run(userId, Date.now());
+    p = db.prepare("SELECT * FROM profile WHERE user_id=?").get(userId);
   }
+  return p;
+}
+// Início do ciclo efetivo: último evento registrado tem prioridade;
+// cai para o campo manual do perfil (compatibilidade).
+function effectiveCycleStart(userId, profile) {
+  try {
+    const ev = db.prepare("SELECT day FROM cycle_events WHERE user_id=? ORDER BY day DESC LIMIT 1").get(userId);
+    if (ev && ev.day) return ev.day;
+  } catch {}
+  return profile.cycle_last || null;
+}
+function statsFor(userId, windowDays = 0) {
+  let rows = db.prepare("SELECT day, weight_kg, calories, exercise_kcal, exercise_src, flags FROM entries WHERE user_id=? ORDER BY day ASC").all(userId);
+  const totalN = rows.length;
+  if (windowDays > 0 && rows.length > windowDays) rows = rows.slice(rows.length - windowDays);
+  if (rows.length < 2) {
+    return { n: rows.length, totalN, ready: false, message: "Adicione pelo menos 2 dias para estimar a TMB." };
+  }
+  const profile = getProfile(userId);
+  const ACT = ACTIVITY_LEVELS.includes(profile.activity) ? profile.activity : 1.2;
+  const cycStart = effectiveCycleStart(userId, profile);
+  const cycProf = { ...profile, cycle_last: cycStart };
   const t0 = new Date(rows[0].day + "T12:00:00Z").getTime();
-  const xs = [], ws = [], cals = [], ps = [];
+  const xs = [], ws = [], nets = [], exs = [], ps = [], fases = [];
   for (const r of rows) {
     xs.push((new Date(r.day + "T12:00:00Z").getTime() - t0) / 86400000);
-    ws.push(r.weight_kg); cals.push(r.calories); ps.push(dayWeight(r.flags || 0));
+    ws.push(r.weight_kg);
+    nets.push(r.calories - (r.exercise_kcal || 0));
+    exs.push(r.exercise_kcal || 0);
+    const fl = r.flags || 0;
+    const ph = cyclePhase(cycProf, r.day);
+    fases.push(ph ? ph.fase : null);
+    // retenção hídrica do ciclo: se o dia cai na janela de retenção e não foi
+    // marcado manualmente, pondera metade automaticamente (não é gordura)
+    const auto = (ph && ph.retencao && fl === 0) ? 0.5 : 1;
+    ps.push(Math.min(dayWeight(fl), auto));
   }
   const n = xs.length;
   const wsum = ps.reduce((s, v) => s + v, 0);
@@ -426,48 +539,134 @@ function statsFor(userId) {
   let num = 0, den = 0;
   for (let i = 0; i < n; i++) { num += ps[i] * (xs[i] - mx) * (ws[i] - mw); den += ps[i] * (xs[i] - mx) ** 2; }
   const slope = den > 1e-9 ? num / den : 0; // kg/dia (ponderado)
-  const avgCal = cals.reduce((s, v) => s + v, 0) / n;
-  const gasto = avgCal - slope * KCAL_PER_KG;
-  const tmb = gasto / SEDENTARY_FACTOR;
-  // resíduos ponderados → R² ponderado; o RUÍDO é estimado só com dias
-  // normais (dias atípicos não contaminam a margem — marcar um dia como
-  // "água/inchaço" reduz a influência dele E estreita a margem).
+  const avgNet = wmean(nets); // média PONDERADA das líquidas (mesmos pesos)
+  const avgEx = wmean(exs);
+  const gasto = avgNet - slope * KCAL_PER_KG;
+  const tmb = gasto / ACT;
   let ssTot = 0, ssRes = 0;
   const resid = [], cleanResid = [];
   for (let i = 0; i < n; i++) {
     const pred = mw + slope * (xs[i] - mx);
     const r = ws[i] - pred;
     resid.push(r);
-    if ((rows[i].flags || 0) === 0) cleanResid.push(r);
+    if ((rows[i].flags || 0) === 0 && fases[i] !== "menstrual" && !(cyclePhase(cycProf, rows[i].day) || {}).retencao) cleanResid.push(r);
     ssTot += ps[i] * (ws[i] - mw) ** 2;
     ssRes += ps[i] * r * r;
   }
   const r2 = ssTot > 0 ? Math.max(0, 1 - ssRes / ssTot) : 0;
   const noise = cleanResid.length >= 3 ? cleanResid : resid;
   const dof = Math.max(1, noise.length - 2);
-  const s2 = noise.reduce((s, v) => s + v * v, 0) / dof; // variância do ruído (dias normais)
-  const seSlope = den > 1e-9 ? Math.sqrt(s2 / den) : 0; // erro-padrão do slope
-  const t95 = n >= 30 ? 2.04 : n >= 10 ? 2.23 : n >= 5 ? 2.78 : 4.3; // t de Student aprox.
-  // Margem = IC95% da tendência com ruído dos dias normais. Marcar dias
-  // atípicos estreita a margem; não marcar alarga.
-  const margemTmb = den > 1e-9 ? Math.max(50, Math.round((t95 * seSlope * KCAL_PER_KG) / SEDENTARY_FACTOR)) : 999;
+  const s2 = noise.reduce((s, v) => s + v * v, 0) / dof;
+  const seSlope = den > 1e-9 ? Math.sqrt(s2 / den) : 0;
+  const t95 = noise.length >= 30 ? 2.04 : noise.length >= 10 ? 2.23 : noise.length >= 5 ? 2.78 : 4.3;
+  const margemTmb = den > 1e-9 ? Math.max(50, Math.round((t95 * seSlope * KCAL_PER_KG) / ACT)) : 999;
+  // Incerteza do exercício: relógio/app e estimativas erram ~25%. Dias medidos
+  // por aparelho (dev) ou sem treino não inflam a margem; o resto sim.
+  const nExUnc = rows.filter((r) => (r.exercise_kcal || 0) > 0 && (r.exercise_src || "est") !== "dev").length;
+  const exIncert = n > 0 ? 0.25 * avgEx * (nExUnc / n) : 0; // kcal/dia
+  const margemEx = Math.round(exIncert / ACT);
+  const margemTmbFinal = margemTmb + margemEx;
   const residTipico = Math.sqrt(noise.reduce((s, v) => s + v * v, 0) / noise.length); // kg
   const spanDays = Math.max(1, Math.round(xs[n - 1] - xs[0]) + 1);
   const flagged = rows.filter((r) => (r.flags || 0) !== 0).length;
   const effN = Math.round(wsum * 10) / 10;
-  const first = ws[0], last = ws[n - 1];
-  const conf = (n >= 14 && spanDays >= 14 && margemTmb < 250) ? (r2 > 0.3 ? "alta" : "média") : n >= 7 ? "média" : "baixa";
+  // delta pela RETA AJUSTADA (robusto a outlier no 1º/último dia)
+  const fitFirst = mw + slope * (xs[0] - mx), fitLast = mw + slope * (xs[n - 1] - mx);
+  // outliers: dias normais fora da janela de retenção, |resíduo| > 2.5σ
+  const sigma = residTipico > 0 ? residTipico : 0.3;
+  const outliers = [];
+  for (let i = 0; i < n; i++) {
+    const ph = cyclePhase(cycProf, rows[i].day);
+    if ((rows[i].flags || 0) === 0 && !(ph && ph.retencao) && Math.abs(resid[i]) > 2.5 * sigma) {
+      outliers.push({ day: rows[i].day, weight_kg: rows[i].weight_kg, residuo: +resid[i].toFixed(2) });
+    }
+  }
+  const conf = (effN >= 12 && spanDays >= 14 && margemTmb < 250) ? (r2 > 0.3 ? "alta" : "média") : effN >= 6 ? "média" : "baixa";
+  // ---- projeção de meta (+ ajuste de ciclo na TMB) ----
+  // Na fase lútea a TMB real sobe ~7%: o "gasto ajustado" reflete isso para
+  // não subestimar o quanto pode comer; dias de retenção não contam como
+  // "fora do ritmo" (a balança sobe por água, não por gordura).
+  const todayPhase = cyclePhase(cycProf, new Date().toISOString().slice(0, 10));
+  const ciclo = profile.cycle_enabled ? {
+    ativo: true,
+    faseAtual: todayPhase ? todayPhase.fase : null,
+    faseAtualLabel: todayPhase ? (FASE_LABEL[todayPhase.fase] || todayPhase.fase) : null,
+    diaCiclo: todayPhase ? todayPhase.dia : null,
+    duracao: todayPhase ? todayPhase.duracao : (profile.cycle_len || 28),
+    retencaoAgora: todayPhase ? todayPhase.retencao : false,
+    tmbFatorFase: todayPhase ? todayPhase.tmbFator : 1,
+  } : { ativo: false };
+  let goal = null;
+  if (profile.goal_kg && profile.goal_kg >= 20 && profile.goal_kg <= 500) {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const curW = fitLast;
+    const diff = profile.goal_kg - curW;
+    const gastoAjust = gasto * (todayPhase ? todayPhase.tmbFator : 1);
+    const g = { alvo: profile.goal_kg, atual: +curW.toFixed(1), diff: +diff.toFixed(1) };
+    if (Math.abs(diff) < 0.3) { g.status = "atingida"; }
+    else if (slope !== 0 && Math.sign(-diff) === Math.sign(slope)) {
+      const daysTo = Math.ceil(Math.abs(diff / slope));
+      const d = new Date(); d.setDate(d.getDate() + daysTo);
+      g.status = "no-ritmo";
+      g.diasRestantes = daysTo;
+      g.previsao = d.toISOString().slice(0, 10);
+      g.ritmoKgSem = +((slope * 7).toFixed(2));
+    } else {
+      // retenção hídrica do ciclo mascara a tendência: não decreta fracasso
+      g.status = (todayPhase && todayPhase.retencao) ? "retencao" : "fora-do-ritmo";
+      g.ritmoKgSem = +((slope * 7).toFixed(2));
+    }
+    if (profile.goal_day && /^\d{4}-\d{2}-\d{2}$/.test(profile.goal_day) && profile.goal_day > todayStr && Math.abs(diff) >= 0.3) {
+      const daysLeft = Math.round((new Date(profile.goal_day + "T12:00:00Z") - new Date(todayStr + "T12:00:00Z")) / 86400000);
+      if (daysLeft > 0) {
+        const kcalDia = gastoAjust + (diff * KCAL_PER_KG) / daysLeft;
+        g.diaAlvo = profile.goal_day;
+        g.diasParaAlvo = daysLeft;
+        g.kcalPorDia = Math.round(kcalDia);
+        g.kcalPorDiaBase = Math.round(gasto + (diff * KCAL_PER_KG) / daysLeft);
+        g.ajusteCiclo = (todayPhase && todayPhase.tmbFator > 1) ? `+${Math.round(gastoAjust - gasto)} pela fase lútea` : null;
+        g.plausivel = kcalDia >= 1200 && kcalDia <= 6000;
+      }
+    }
+    goal = g;
+  }
+  // ---- trajetória: peso ESPERADO dia a dia ----
+  // Para cada dia com registro: esperado = reta ajustada (sem ruído).
+  // Projeção futura: 30 dias à frente no ritmo atual + faixa ±margem.
+  const traj = rows.map((r, i) => ({
+    day: r.day,
+    real: r.weight_kg,
+    esperado: +(mw + slope * (xs[i] - mx)).toFixed(2),
+    fase: fases[i],
+    flags: r.flags || 0,
+  }));
+  const lastDate = new Date(rows[n - 1].day + "T12:00:00Z").getTime();
+  const proj = [];
+  for (let d = 1; d <= 30; d++) {
+    const dt = new Date(lastDate + d * 86400000).toISOString().slice(0, 10);
+    const w = fitLast + slope * d;
+    const band = (margemTmb * ACT * d) / (KCAL_PER_KG * Math.sqrt(Math.max(1, n)));
+    proj.push({ day: dt, esperado: +w.toFixed(2), min: +(w - band).toFixed(2), max: +(w + band).toFixed(2) });
+  }
   return {
-    n, ready: true, spanDays, firstWeight: first, lastWeight: last,
-    deltaKg: +(last - first).toFixed(2), avgCalories: Math.round(avgCal),
+    n, totalN, window: windowDays || 0, ready: true, spanDays,
+    firstWeight: ws[0], lastWeight: ws[n - 1],
+    deltaKg: +((fitLast - fitFirst).toFixed(2)),
+    avgCalories: Math.round(avgNet + avgEx), avgLiquidas: Math.round(avgNet), avgExercicio: Math.round(avgEx),
     slopeKgDay: +slope.toFixed(4), gastoDiario: Math.round(gasto),
+    gastoAjustadoCiclo: Math.round(gasto * (todayPhase ? todayPhase.tmbFator : 1)),
+    atividade: ACT,
     tmbEstimada: Math.round(tmb),
-    margemTmb: margemTmb, tmbMin: Math.round(tmb - margemTmb), tmbMax: Math.round(tmb + margemTmb),
-    gastoMin: Math.round(gasto - margemTmb * SEDENTARY_FACTOR), gastoMax: Math.round(gasto + margemTmb * SEDENTARY_FACTOR),
+    margemTmb: margemTmbFinal, tmbMin: Math.round(tmb - margemTmbFinal), tmbMax: Math.round(tmb + margemTmbFinal),
+    gastoMin: Math.round(gasto - margemTmbFinal * ACT), gastoMax: Math.round(gasto + margemTmbFinal * ACT),
+    margemBalanca: margemTmb, margemExercicio: margemEx, exercicioIncertoKcal: Math.round(exIncert),
     residuoTipicoKg: +residTipico.toFixed(2), diasAtipicos: flagged, diasEfetivos: effN,
+    outliers,
     r2: +r2.toFixed(3), confianca: conf,
     plausivel: gasto > 800 && gasto < 8000,
-    metodo: `Regressão ponderada em ${n} dias (${flagged} atípico(s), n efetivo ${effN}): gasto = média de calorias − (tendência × ${KCAL_PER_KG}); TMB ≈ gasto ÷ ${SEDENTARY_FACTOR}. Margem = IC95% da tendência + ruído típico de ${residTipico.toFixed(2)} kg/dia. Dias com água/inchaço/jantar pesado pesam menos no ajuste e alargam a margem.`
+    goal, ciclo,
+    trajetoria: traj, projecao: proj,
+    metodo: `Regressão ponderada em ${n} dias${windowDays ? ` (janela ${windowDays})` : ""} (${flagged} atípico(s), n efetivo ${effN}): gasto = média ponderada das calorias líquidas (ingeridas − exercício) − (tendência × ${KCAL_PER_KG}); TMB ≈ gasto ÷ ${ACT} (fator de atividade do perfil). Margem = IC95% da balança (±${margemTmb})${margemEx > 0 ? ` + incerteza do exercício (±${margemEx}, ~25% do treino estimado)` : ""}. Marcar dias atípicos estreita a margem.${profile.cycle_enabled ? " Ciclo ativo: dias de retenção ponderam metade automaticamente." : ""}`
   };
 }
 
@@ -485,10 +684,19 @@ async function handler(req, res) {
     return serveStatic(req, res, p === "/" ? "/index.html" : p);
   }
 
+  // health check público (p/ monitor/tunnel) — sem dados sensíveis
+  if (p === "/api/health" && method === "GET") {
+    secHeaders(res, false);
+    const body = JSON.stringify({ ok: true });
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store", "Content-Length": body.length });
+    res.end(body);
+    return;
+  }
+
   // ---- login ----
   if (p === "/api/login" && method === "POST") {
     if (!ipAllowed(ip)) { audit(ip, "", "login_ratelimit", ""); await sleep(800); return json(res, 429, { error: "muitas tentativas, aguarde 1 minuto" }, req); }
-    let body; try { body = await readJson(req); } catch (e) { return json(res, 400, { error: e.message }, req); }
+    let body; try { body = await readJson(req);     } catch (e) { return json(res, e.code === 413 ? 413 : 400, { error: e.message }, req); }
     const username = String(body.username || "").slice(0, 64);
     const password = String(body.password || "");
     const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username);
@@ -540,7 +748,7 @@ async function handler(req, res) {
   }
   if (p === "/api/users" && method === "POST") {
     if (sess.role !== "admin") return json(res, 403, { error: "só administrador pode criar perfis" }, req);
-    let body; try { body = await readJson(req); } catch (e) { return json(res, 400, { error: e.message }, req); }
+    let body; try { body = await readJson(req);     } catch (e) { return json(res, e.code === 413 ? 413 : 400, { error: e.message }, req); }
     const username = String(body.username || "").trim();
     const password = String(body.password || "");
     const role = body.role === "admin" ? "admin" : "user";
@@ -556,7 +764,7 @@ async function handler(req, res) {
   let m;
   if ((m = p.match(/^\/api\/users\/(\d+)\/reset-password$/)) && method === "POST") {
     if (sess.role !== "admin") return json(res, 403, { error: "só administrador" }, req);
-    let body; try { body = await readJson(req); } catch (e) { return json(res, 400, { error: e.message }, req); }
+    let body; try { body = await readJson(req);     } catch (e) { return json(res, e.code === 413 ? 413 : 400, { error: e.message }, req); }
     const password = String(body.password || "");
     if (!validPassword(password)) return json(res, 400, { error: "senha: mínimo 12 caracteres" }, req);
     const { hash, salt } = hashPassword(password);
@@ -586,7 +794,7 @@ async function handler(req, res) {
 
   // ---- entradas ----
   if (p === "/api/entries" && method === "GET") {
-    const rows = db.prepare("SELECT id, day, weight_kg, calories, flags, note FROM entries WHERE user_id=? ORDER BY day DESC LIMIT 500").all(sess.user_id);
+    const rows = db.prepare("SELECT id, day, weight_kg, calories, exercise_kcal, exercise_src, flags, note FROM entries WHERE user_id=? ORDER BY day DESC LIMIT 500").all(sess.user_id);
     const ids = rows.map((r) => r.id);
     let mediaByEntry = {};
     if (ids.length) {
@@ -597,29 +805,35 @@ async function handler(req, res) {
     return json(res, 200, { entries: rows.map((r) => ({ ...r, media: mediaByEntry[r.id] || [] })) }, req);
   }
   if (p === "/api/entries" && method === "POST") {
-    let body; try { body = await readJson(req); } catch (e) { return json(res, 400, { error: e.message }, req); }
+    let body; try { body = await readJson(req); } catch (e) { return json(res, e.code === 413 ? 413 : 400, { error: e.message }, req); }
     const day = String(body.day || "");
     const weight = Number(body.weight_kg);
     const calories = Number(body.calories);
+    const exercise = validExercise(body.exercise_kcal);
+    const exSrc = validExerciseSrc(body.exercise_src);
     const flags = parseFlags(body.flags ?? body.flagsKeys);
     const note = String(body.note || "").slice(0, 500);
     if (!validDay(day)) return json(res, 400, { error: "data inválida (use datas até hoje)" }, req);
     if (!(weight >= 20 && weight <= 500)) return json(res, 400, { error: "peso inválido (20–500 kg)" }, req);
     if (!(Number.isInteger(calories) && calories >= 0 && calories <= 30000)) return json(res, 400, { error: "calorias inválidas (0–30000)" }, req);
+    if (exercise === null) return json(res, 400, { error: "exercício inválido (0–10000 kcal)" }, req);
     const now = Date.now();
     try {
-      const r = db.prepare("INSERT INTO entries(user_id,day,weight_kg,calories,flags,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)").run(sess.user_id, day, weight, calories, flags, note, now, now);
+      const r = db.prepare("INSERT INTO entries(user_id,day,weight_kg,calories,exercise_kcal,exercise_src,flags,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run(sess.user_id, day, weight, calories, exercise, exSrc, flags, note, now, now);
       return json(res, 201, { ok: true, id: Number(r.lastInsertRowid) }, req);
     } catch { return json(res, 409, { error: "já existe registro neste dia — edite o existente" }, req); }
   }
   if ((m = p.match(/^\/api\/entries\/(\d+)$/)) && method === "PUT") {
-    let body; try { body = await readJson(req); } catch (e) { return json(res, 400, { error: e.message }, req); }
+    let body; try { body = await readJson(req); } catch (e) { return json(res, e.code === 413 ? 413 : 400, { error: e.message }, req); }
     const weight = Number(body.weight_kg), calories = Number(body.calories);
+    const exercise = validExercise(body.exercise_kcal);
+    const exSrc = validExerciseSrc(body.exercise_src);
     const flags = parseFlags(body.flags ?? body.flagsKeys);
     const note = String(body.note || "").slice(0, 500);
     if (!(weight >= 20 && weight <= 500)) return json(res, 400, { error: "peso inválido" }, req);
     if (!(Number.isInteger(calories) && calories >= 0 && calories <= 30000)) return json(res, 400, { error: "calorias inválidas" }, req);
-    const r = db.prepare("UPDATE entries SET weight_kg=?, calories=?, flags=?, note=?, updated_at=? WHERE id=? AND user_id=?").run(weight, calories, flags, note, Date.now(), Number(m[1]), sess.user_id);
+    if (exercise === null) return json(res, 400, { error: "exercício inválido (0–10000 kcal)" }, req);
+    const r = db.prepare("UPDATE entries SET weight_kg=?, calories=?, exercise_kcal=?, exercise_src=?, flags=?, note=?, updated_at=? WHERE id=? AND user_id=?").run(weight, calories, exercise, exSrc, flags, note, Date.now(), Number(m[1]), sess.user_id);
     if (r.changes === 0) return json(res, 404, { error: "não encontrado" }, req);
     return json(res, 200, { ok: true }, req);
   }
@@ -635,12 +849,13 @@ async function handler(req, res) {
   if ((m = p.match(/^\/api\/entries\/(\d+)\/media$/)) && method === "POST") {
     const entry = db.prepare("SELECT * FROM entries WHERE id=? AND user_id=?").get(Number(m[1]), sess.user_id);
     if (!entry) return json(res, 404, { error: "registro não encontrado" }, req);
-    const count = db.prepare("SELECT COUNT(*) c FROM media WHERE entry_id=?").get(entry.id).c;
-    if (count >= 6) return json(res, 400, { error: "máximo 6 arquivos por dia" }, req);
     let files;
     try { files = await parseMultipart(req); }
     catch (e) { return json(res, 400, { error: e.message }, req); }
     if (!files.length) return json(res, 400, { error: "nenhum arquivo" }, req);
+    // limite aplicado ANTES de gravar (conta atual + lote), sem condição de corrida
+    const count = db.prepare("SELECT COUNT(*) c FROM media WHERE entry_id=?").get(entry.id).c;
+    if (count + files.length > 6) return json(res, 400, { error: `máximo 6 arquivos por dia (já há ${count})` }, req);
     const out = [];
     for (const f of files) {
       const stored = crypto.randomBytes(24).toString("hex") + EXT[f.mime];
@@ -658,7 +873,8 @@ async function handler(req, res) {
     try { fs.unlinkSync(path.join(UPLOAD_DIR, path.basename(x.stored))); } catch {}
     return json(res, 200, { ok: true }, req);
   }
-  // servir mídia (dono vê a sua; admin vê qualquer uma via ?user= — não: só dono; admin usa painel? simplifica: dono + admin)
+  // servir mídia (dono + admin) com streaming e Range (seek em vídeo, sem
+  // carregar o arquivo inteiro na RAM)
   if ((m = p.match(/^\/media\/([a-f0-9]{48}\.(?:jpg|png|webp|gif|mp4|webm))$/)) && method === "GET") {
     const stored = m[1];
     const x = db.prepare("SELECT * FROM media WHERE stored=?").get(stored);
@@ -666,11 +882,26 @@ async function handler(req, res) {
     if (x.user_id !== sess.user_id && sess.role !== "admin") return json(res, 403, { error: "sem acesso" }, req);
     const fp = path.join(UPLOAD_DIR, path.basename(stored));
     if (!fp.startsWith(UPLOAD_DIR)) return json(res, 400, { error: "bad path" }, req);
-    fs.readFile(fp, (err, data) => {
-      if (err) { secHeaders(res, false); res.writeHead(404); res.end(); return; }
+    fs.stat(fp, (err, st) => {
+      if (err || !st.isFile()) { secHeaders(res, false); res.writeHead(404); res.end(); return; }
       secHeaders(res, false);
-      res.writeHead(200, { "Content-Type": x.mime, "Content-Length": data.length, "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff", "Content-Disposition": "inline" });
-      res.end(data);
+      const total = st.size;
+      const base = { "Content-Type": x.mime, "X-Content-Type-Options": "nosniff", "Content-Disposition": "inline", "Cache-Control": "private, max-age=3600", "Accept-Ranges": "bytes" };
+      const range = req.headers.range;
+      if (range && /^bytes=\d*-\d*$/.test(range)) {
+        const [s, e] = range.replace("bytes=", "").split("-");
+        const start = s === "" ? Math.max(0, total - parseInt(e || "0", 10)) : parseInt(s, 10);
+        const end = e === "" ? total - 1 : parseInt(e, 10);
+        if (Number.isNaN(start) || Number.isNaN(end) || start < 0 || end >= total || start > end) {
+          res.writeHead(416, { ...base, "Content-Range": `bytes */${total}` });
+          res.end(); return;
+        }
+        res.writeHead(206, { ...base, "Content-Range": `bytes ${start}-${end}/${total}`, "Content-Length": end - start + 1 });
+        fs.createReadStream(fp, { start, end }).pipe(res);
+      } else {
+        res.writeHead(200, { ...base, "Content-Length": total });
+        fs.createReadStream(fp).pipe(res);
+      }
     });
     return;
   }
@@ -680,9 +911,92 @@ async function handler(req, res) {
     return json(res, 200, { flags: Object.fromEntries(Object.entries(FLAGS).map(([k, v]) => [k, v.label])) }, req);
   }
 
-  // ---- estatística TMB ----
+  // ---- perfil: meta de peso + fator de atividade + ciclo ----
+  if (p === "/api/profile" && method === "GET") {
+    const pr = getProfile(sess.user_id);
+    return json(res, 200, {
+      goal_kg: pr.goal_kg, goal_day: pr.goal_day, activity: pr.activity, levels: ACTIVITY_LEVELS,
+      cycle_enabled: !!pr.cycle_enabled, cycle_last: pr.cycle_last, cycle_len: pr.cycle_len || 28,
+    }, req);
+  }
+  if (p === "/api/profile" && (method === "PUT" || method === "POST")) {
+    let body; try { body = await readJson(req); } catch (e) { return json(res, e.code === 413 ? 413 : 400, { error: e.message }, req); }
+    const hasGoal = body.goal_kg !== undefined && body.goal_kg !== null && String(body.goal_kg) !== "";
+    const goalKg = hasGoal ? Number(body.goal_kg) : null;
+    const goalDay = body.goal_day ? String(body.goal_day) : null;
+    const act = body.activity !== undefined ? Number(body.activity) : 1.2;
+    const cycOn = body.cycle_enabled === true || body.cycle_enabled === 1;
+    const cycLast = body.cycle_last ? String(body.cycle_last) : null;
+    const cycLen = body.cycle_len !== undefined ? parseInt(body.cycle_len, 10) : 28;
+    if (hasGoal && !(goalKg >= 20 && goalKg <= 500)) return json(res, 400, { error: "meta inválida (20–500 kg)" }, req);
+    if (goalDay && !/^\d{4}-\d{2}-\d{2}$/.test(goalDay)) return json(res, 400, { error: "data da meta inválida" }, req);
+    if (!ACTIVITY_LEVELS.includes(act)) return json(res, 400, { error: "nível de atividade inválido" }, req);
+    if (cycLast && !/^\d{4}-\d{2}-\d{2}$/.test(cycLast)) return json(res, 400, { error: "data do ciclo inválida" }, req);
+    if (cycLast && cycLast > new Date().toISOString().slice(0, 10)) return json(res, 400, { error: "data do ciclo não pode ser futura" }, req);
+    if (!(cycLen >= 20 && cycLen <= 45)) return json(res, 400, { error: "duração do ciclo inválida (20–45 dias)" }, req);
+    getProfile(sess.user_id);
+    db.prepare("UPDATE profile SET goal_kg=?, goal_day=?, activity=?, cycle_enabled=?, cycle_last=?, cycle_len=?, updated_at=? WHERE user_id=?")
+      .run(goalKg, goalDay, act, cycOn ? 1 : 0, cycLast, cycLen, Date.now(), sess.user_id);
+    return json(res, 200, { ok: true }, req);
+  }
+
+  // ---- eventos de início do ciclo (histórico) ----
+  if (p === "/api/cycle/events" && method === "GET") {
+    const evs = db.prepare("SELECT id, day FROM cycle_events WHERE user_id=? ORDER BY day DESC LIMIT 24").all(sess.user_id);
+    return json(res, 200, { events: evs }, req);
+  }
+  if (p === "/api/cycle/events" && method === "POST") {
+    let body; try { body = await readJson(req); } catch (e) { return json(res, e.code === 413 ? 413 : 400, { error: e.message }, req); }
+    const day = String(body.day || new Date().toISOString().slice(0, 10));
+    if (!validDay(day)) return json(res, 400, { error: "data inválida (use datas até hoje)" }, req);
+    try {
+      db.prepare("INSERT INTO cycle_events(user_id,day,created_at) VALUES(?,?,?)").run(sess.user_id, day, Date.now());
+    } catch { return json(res, 409, { error: "data já registrada" }, req); }
+    db.prepare("UPDATE profile SET cycle_last=?, updated_at=? WHERE user_id=?").run(day, Date.now(), sess.user_id);
+    return json(res, 201, { ok: true }, req);
+  }
+  if ((m = p.match(/^\/api\/cycle\/events\/(\d+)$/)) && method === "DELETE") {
+    db.prepare("DELETE FROM cycle_events WHERE id=? AND user_id=?").run(Number(m[1]), sess.user_id);
+    const last = db.prepare("SELECT day FROM cycle_events WHERE user_id=? ORDER BY day DESC LIMIT 1").get(sess.user_id);
+    db.prepare("UPDATE profile SET cycle_last=?, updated_at=? WHERE user_id=?").run(last ? last.day : null, Date.now(), sess.user_id);
+    return json(res, 200, { ok: true }, req);
+  }
+
+  // ---- fase do ciclo em um dia ----
+  if (p === "/api/cycle" && method === "GET") {
+    const pr = getProfile(sess.user_id);
+    const day = url.searchParams.get("day") || new Date().toISOString().slice(0, 10);
+    const ph = cyclePhase(pr, day);
+    return json(res, 200, {
+      ativo: !!pr.cycle_enabled,
+      fase: ph ? ph.fase : null,
+      faseLabel: ph ? (FASE_LABEL[ph.fase] || ph.fase) : null,
+      dia: ph ? ph.dia : null, duracao: ph ? ph.duracao : (pr.cycle_len || 28),
+      retencao: ph ? ph.retencao : false, tmbFator: ph ? ph.tmbFator : 1,
+    }, req);
+  }
+
+  // ---- estatística TMB (aceita ?window=14|28|0) ----
   if (p === "/api/stats" && method === "GET") {
-    return json(res, 200, statsFor(sess.user_id), req);
+    const w = [14, 28].includes(parseInt(url.searchParams.get("window") || "0", 10))
+      ? parseInt(url.searchParams.get("window"), 10) : 0;
+    return json(res, 200, statsFor(sess.user_id, w), req);
+  }
+
+  // ---- export CSV ----
+  if (p === "/api/export.csv" && method === "GET") {
+    const rows = db.prepare("SELECT day, weight_kg, calories, exercise_kcal, exercise_src, flags, note FROM entries WHERE user_id=? ORDER BY day ASC").all(sess.user_id);
+    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = ["data,peso_kg,calorias,exercicio_kcal,exercicio_fonte,atipico,nota"];
+    for (const r of rows) {
+      const fl = Object.keys(FLAGS).filter((k) => ((r.flags | 0) & FLAGS[k].bit)).join(";");
+      lines.push([r.day, r.weight_kg, r.calories, r.exercise_kcal || 0, r.exercise_src || "est", fl, q(r.note)].join(","));
+    }
+    const body = "\uFEFF" + lines.join("\n");
+    secHeaders(res, false);
+    res.writeHead(200, { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": "attachment; filename=peso-tracker.csv", "Cache-Control": "no-store", "Content-Length": Buffer.byteLength(body) });
+    res.end(body);
+    return;
   }
 
   return json(res, 404, { error: "não encontrado" }, req);
@@ -831,3 +1145,16 @@ server.listen(PORT, BIND, () => {
   try { fs.writeFileSync(PORT_FILE, String(PORT)); } catch {}
   console.log(`Peso Tracker em http://${BIND}:${PORT}  (exponha via Cloudflare Tunnel, veja tunnel.md)`);
 });
+
+// encerra limpo no SIGTERM/SIGINT (checkpoint do WAL, sem corromper o banco)
+let _closing = false;
+for (const sig of ["SIGTERM", "SIGINT"]) {
+  process.on(sig, () => {
+    if (_closing) return;
+    _closing = true;
+    try { server.close(); } catch {}
+    try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {}
+    try { db.close(); } catch {}
+    process.exit(0);
+  });
+}

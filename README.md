@@ -11,14 +11,31 @@ Zero dependências — apenas **Node.js ≥ 22** (usa `node:sqlite` embutido).
 
 ## Funcionalidades
 
-- Registro diário: data, peso, calorias, nota + flags de dia atípico
-- Estimativa de TMB/gasto com faixa de confiança, tendência kg/sem, R²
-- Mídia por dia (jpg/png/webp/gif/mp4/webm, até 15 MB): thumbnails, lightbox,
-  comparador Antes/Depois com delta de peso
-- Gráfico de evolução (canvas próprio, sem CDN)
+- Registro diário: data, peso, calorias, **exercício (kcal + fonte: estimativa/relógio/não sei)**, nota + flags de dia atípico (inclui ciclo)
+- Estimativa de TMB/gasto por regressão ponderada sobre **calorias líquidas**
+  (ingeridas − exercício), com faixa de confiança IC95%, tendência kg/sem, R²
+- Janela de cálculo (tudo / 28d / 14d), média móvel 7d no gráfico, detecção de
+  outliers com sugestão de marcar como atípico
+- **Aba Meta**: peso-alvo + dia-alvo → projeção de chegada no ritmo atual e
+  **kcal/dia necessárias** (com alerta se fora da faixa segura); fator de
+  atividade configurável (1.2–1.725)
+- **Aba Estimativa**: peso esperado dia a dia (reta ajustada) vs real, com
+  diferença e fase do ciclo; projeção dos próximos 30 dias com faixa
+- **Ciclo menstrual (opcional)**: ative e informe o 1º dia da última
+  menstruação + duração; depois só clique em **"Começou hoje"** quando descer
+  (histórico de inícios, o último vale). Fases estimadas
+  (menstrual/folicular/ovulatória/lútea). Na lútea a TMB considerada sobe ~7%;
+  em menstruação/TPM a retenção (+0.5 a +2 kg de água) pondera metade no
+  cálculo, não gera alerta de outlier nem marca a meta como "fora do ritmo".
+  Estimativas populacionais — não é previsão médica nem contraceptivo
+- Margem de erro decomposta: balança (IC95%) + incerteza do exercício (~25%
+  do treino estimado/chutado; medida de aparelho não infla)
+- Mídia por dia (jpg/png/webp/gif/mp4/webm, até 15 MB, streaming com seek):
+  thumbnails, lightbox, comparador Antes/Depois com delta de peso
+- Gráfico de evolução (canvas próprio, sem CDN), export CSV
 - Auth com senha (scrypt), lockout progressivo anti-bruteforce, rate-limit
   por IP, CSRF, sessões HttpOnly; **só admin cria perfis**
-- Auditoria em tabela `audit` (logins, bloqueios, criação de usuários…)
+- Auditoria em tabela `audit` com rotação (últimos 5000 eventos)
 
 ## Como rodar
 

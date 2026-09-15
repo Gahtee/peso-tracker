@@ -146,7 +146,30 @@ button{font-family:var(--font)}
 #chart{width:100%;height:auto;background:rgba(0,0,0,.2);border:1px solid var(--line2);border-radius:6px}
 .legend{margin:8px 0 0}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
-.dot-ok{background:var(--acc-hi)}.dot-flag{background:var(--warn)}
+.dot-ok{background:var(--acc-hi)}.dot-flag{background:var(--warn)}.dot-ma{background:var(--ok)}
+.dot-exp{background:#f7f8fa}.dot-cyc{background:rgba(242,201,76,.6)}.dot-ma{background:var(--ok)}
+.seg{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg button{background:none;border:0;color:var(--mut);font-size:12px;padding:5px 12px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--line2)}
+.seg button.active{background:rgba(255,255,255,.08);color:var(--ink)}
+.outlier{display:flex;align-items:center;gap:10px;margin-top:10px;padding:8px 12px;font-size:12px;
+  border:1px solid rgba(242,201,76,.3);background:rgba(242,201,76,.06);border-radius:7px;color:var(--ink2)}
+.outlier button{margin-left:auto;flex:none}
+.list-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line2)}
+.list-toolbar a{text-decoration:none}
+.goal-hero{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0}
+.goal-hero .prop{min-width:150px}
+.cycle-box{margin-top:14px;padding-top:12px;border-top:1px solid var(--line2)}
+.cycle-box .flag{margin-bottom:8px}
+.fc-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
+.fc-table td,.fc-table th{padding:7px 8px;border-bottom:1px solid var(--line2);text-align:left;white-space:nowrap;font-variant-numeric:tabular-nums}
+.fc-table th{color:var(--faint);font-weight:500}
+.fc-table tr.today td{background:rgba(94,106,210,.08)}
+.fc-badge{font-size:11px;border:1px solid var(--line);border-radius:99px;padding:1px 8px;color:var(--mut)}
+.fc-badge.ret{background:rgba(242,201,76,.08);border-color:rgba(242,201,76,.35);color:#f5d67b}
+.btn-danger{padding:7px 14px;border:0;border-radius:6px;cursor:pointer;background:#3a1d1f;color:#ff9a9a;
+  font-weight:500;font-size:13px;border:1px solid rgba(235,87,87,.4)}
+.btn-danger:hover{background:#4a2326}
 
 /* antes/depois */
 .cmp-ctl{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:4px}

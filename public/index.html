@@ -38,6 +38,8 @@
       <button data-view="overview" class="active"><i>◈</i><span class="txt">Visão geral</span></button>
       <button data-view="entries"><i>▤</i><span class="txt">Registros</span><span class="count" id="nav-count"></span></button>
       <button data-view="compare"><i>◐</i><span class="txt">Antes / Depois</span></button>
+      <button data-view="goal"><i>◎</i><span class="txt">Meta</span></button>
+      <button data-view="forecast"><i>∴</i><span class="txt">Estimativa</span></button>
       <button data-view="admin" id="nav-admin" class="hidden"><i>⚙</i><span class="txt">Usuários</span></button>
     </nav>
     <div class="side-foot">
@@ -67,15 +69,23 @@
         <div class="panel">
           <div class="panel-head">
             <div><p class="kicker">Tendência</p><h2>Evolução do peso</h2></div>
+            <div class="seg" id="win-seg">
+              <button data-w="0" class="active">Tudo</button><button data-w="28">28d</button><button data-w="14">14d</button>
+            </div>
           </div>
           <canvas id="chart" width="900" height="280"></canvas>
-          <p class="muted small legend"><span class="dot dot-ok"></span>normal &nbsp; <span class="dot dot-flag"></span>atípico</p>
+          <p class="muted small legend"><span class="dot dot-ok"></span>peso &nbsp; <span class="dot dot-exp"></span>esperado &nbsp; <span class="dot dot-ma"></span>média 7d &nbsp; <span class="dot dot-flag"></span>atípico &nbsp; <span class="dot dot-cyc"></span>retenção ciclo</p>
+          <div id="outliers"></div>
         </div>
       </div>
 
       <!-- REGISTROS -->
       <div id="view-entries" class="view hidden">
         <div class="panel pad0">
+          <div class="list-toolbar">
+            <span class="muted small" id="entries-info"></span>
+            <a class="btn-ghost" id="csv-btn" href="/api/export.csv" download>Exportar CSV</a>
+          </div>
           <div class="list-head">
             <span class="col-id">Data</span>
             <span class="col-w">Peso</span>
@@ -99,6 +109,53 @@
             <button id="cmp-btn" class="btn-ghost">Comparar</button>
           </div>
           <div id="cmp" class="cmp"></div>
+        </div>
+      </div>
+
+      <!-- META -->
+      <div id="view-goal" class="view hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <div><p class="kicker">Planejamento</p><h2>Meta de peso</h2></div>
+          </div>
+          <div class="cmp-ctl">
+            <label class="lbl">Peso-alvo (kg)<input id="g-kg" type="number" step="0.1" min="20" max="500" placeholder="ex: 75"></label>
+            <label class="lbl">Até o dia<input id="g-day" type="date"></label>
+            <label class="lbl">Atividade<select id="g-act"></select></label>
+            <button id="g-btn" class="btn-ghost">Salvar meta</button>
+          </div>
+          <p id="g-err" class="err"></p>
+          <div id="goal-box"></div>
+          <div class="cycle-box">
+            <label class="flag"><input type="checkbox" id="c-on"><span>Acompanhar ciclo menstrual</span></label>
+            <div class="row3" id="c-fields">
+              <label class="lbl">1º dia da última menstruação<input id="c-last" type="date"></label>
+              <label class="lbl">Duração do ciclo (dias)<input id="c-len" type="number" min="20" max="45" step="1"></label>
+            </div>
+            <div class="row3" style="margin-top:8px">
+              <div><button id="c-today" class="btn-ghost">Começou hoje</button></div>
+              <div id="c-list" class="muted small" style="align-self:center"></div>
+            </div>
+            <p class="muted small">Como usar: ative e informe o 1º dia da última menstruação. Depois, só volte aqui e clique em <b>“Começou hoje”</b> quando descer de novo — o app estima as fases sozinho. Marcar a flag “Período menstrual / TPM” no registro do dia é opcional: serve para ciclo irregular ou sintoma mais forte que a estimativa. Na fase lútea a TMB sobe ~7% e na menstruação/TPM a balança pode marcar +0.5 a +2 kg de água. Estimativas populacionais — não é previsão médica nem contraceptivo.</p>
+          </div>
+          <p class="muted small" style="margin-top:12px">Atividade multiplica a TMB para estimar o gasto: 1.2 sedentário · 1.375 leve · 1.55 moderado · 1.725 intenso. O cálculo de kcal/dia usa seu gasto medido, não tabelas genéricas.</p>
+        </div>
+      </div>
+
+      <!-- ESTIMATIVA: peso esperado dia a dia -->
+      <div id="view-forecast" class="view hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <div><p class="kicker">Trajetória</p><h2>Peso esperado x real</h2></div>
+          </div>
+          <p class="muted small">Esperado = reta ajustada (tendência sem o ruído do dia). Use para saber se o peso de hoje está dentro do previsto ou se foi água/balança.</p>
+          <div id="forecast-box"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <div><p class="kicker">Próximos 30 dias</p><h2>Projeção</h2></div>
+          </div>
+          <div id="proj-box"></div>
         </div>
       </div>
 
@@ -133,6 +190,11 @@
       <label class="lbl">Peso (kg)<input id="f-weight" type="number" step="0.1" min="20" max="500" inputmode="decimal" placeholder="82.4" required></label>
       <label class="lbl">Calorias<input id="f-cal" type="number" step="1" min="0" max="30000" inputmode="numeric" placeholder="2300" required></label>
     </div>
+    <div class="row3">
+      <label class="lbl">Exercício (kcal)<input id="f-ex" type="number" step="1" min="0" max="10000" inputmode="numeric" placeholder="0"></label>
+      <label class="lbl">Medida do exercício<select id="f-exsrc"><option value="est">Estimativa</option><option value="dev">Relógio/app</option><option value="nao">Não sei / chute</option></select></label>
+    </div>
+    <p class="muted small">O gasto do treino nunca é exato (relógio erra ~25%). Estimativas e chutes alargam a margem de erro da TMB; medida de aparelho, não. Em branco = 0 (subestima o gasto de quem treina sem anotar).</p>
     <label class="lbl">Nota<input id="f-note" maxlength="500" placeholder="Como foi o dia? (opcional)"></label>
     <label class="lbl">Foto / vídeo <span class="muted">— jpg png webp gif mp4 webm, 15 MB</span>
       <input id="f-media" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm" multiple>
@@ -154,6 +216,8 @@
     <div class="row3">
       <label class="lbl">Peso (kg)<input id="e-weight" type="number" step="0.1" min="20" max="500" required></label>
       <label class="lbl">Calorias<input id="e-cal" type="number" step="1" min="0" max="30000" required></label>
+      <label class="lbl">Exercício (kcal)<input id="e-ex" type="number" step="1" min="0" max="10000"></label>
+      <label class="lbl">Medida<select id="e-exsrc"><option value="est">Estimativa</option><option value="dev">Relógio/app</option><option value="nao">Não sei / chute</option></select></label>
     </div>
     <label class="lbl">Nota<input id="e-note" maxlength="500"></label>
     <fieldset id="e-flags" class="flags"><legend>Dia atípico?</legend></fieldset>
@@ -166,6 +230,32 @@
 </dialog>
 
 <dialog id="lightbox"><img id="lb-img" alt=""><br><button id="lb-close" class="btn-ghost">Fechar</button></dialog>
+
+<!-- CONFIRM INLINE (estilo Linear, sem confirm() nativo) -->
+<dialog id="dlg-confirm">
+  <form method="dialog" class="dlg">
+    <p class="kicker">Confirmar</p>
+    <h2 id="c-title">Excluir?</h2>
+    <p class="muted small" id="c-text"></p>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn-ghost">Cancelar</button>
+      <button id="c-ok" value="default" class="btn-danger">Excluir</button>
+    </div>
+  </form>
+</dialog>
+<!-- PROMPT INLINE -->
+<dialog id="dlg-prompt">
+  <form method="dialog" class="dlg">
+    <p class="kicker" id="p-kicker">Valor</p>
+    <h2 id="p-title">Digite</h2>
+    <label class="lbl"><span id="p-label">Valor</span><input id="p-input" maxlength="128"></label>
+    <p id="p-err" class="err"></p>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn-ghost" formnovalidate>Cancelar</button>
+      <button id="p-ok" value="default" class="btn-primary">Confirmar</button>
+    </div>
+  </form>
+</dialog>
 <script src="/app.js"></script>
 </body>
 </html>
