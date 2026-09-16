@@ -55,7 +55,7 @@ export async function handler(req, res) {
   }
 
   // ---- admin: gerenciar usuários (só admin cria perfis) ----
-  if (p === "/api/users" && method === "GET") return handleListUsers(req, res, sess);
+  if (p === "/api/users" && method === "GET") return handleListUsers(res, sess);
   if (p === "/api/users" && method === "POST") return handleCreateUser(req, res, ip, sess);
 
   let m;
