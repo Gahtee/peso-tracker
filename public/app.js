@@ -66,10 +66,109 @@ async function api(path, opts = {}) {
   return j;
 }
 
+/* ---------- movimento: aurora + neve + micro-interações ---------- */
+// Respeita prefers-reduced-motion e não usa nenhuma dependência externa.
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+function countUp(el, target, ms = 700) {
+  if (REDUCED || !el || !Number.isFinite(Number(target))) { if (el) el.textContent = target; return; }
+  const t0 = performance.now(), from = 0, to = Number(target);
+  const step = (t) => {
+    const p = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(from + (to - from) * e);
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+function staggerChildren(container, sel, base = 26, cap = 10) {
+  if (REDUCED || !container) return;
+  [...container.querySelectorAll(sel)].slice(0, cap).forEach((el, i) => {
+    el.classList.remove("fx-in");
+    el.style.animationDelay = Math.min(i * base, cap * base) + "ms";
+    void el.offsetWidth;
+    el.classList.add("fx-in");
+  });
+}
+// Aurora boreal ("iglu"): 3 blobs de luz à deriva num canvas fixo atrás do app.
+function initAmbient() {
+  const cv = $("ambient");
+  if (!cv || REDUCED) { if (cv) cv.remove(); const sn = $("snow"); if (sn) sn.remove(); return; }
+  const ctx = cv.getContext("2d");
+  let W, H, t = Math.random() * 1000;
+  const fit = () => {
+    const d = Math.min(1.5, devicePixelRatio || 1);
+    W = cv.width = innerWidth * d; H = cv.height = innerHeight * d;
+    cv.style.width = innerWidth + "px"; cv.style.height = innerHeight + "px";
+  };
+  fit(); addEventListener("resize", fit);
+  const blobs = [
+    { h: 232, a: .16, r: .42, sx: .00016, sy: .00023, px: .18, py: .06 },
+    { h: 200, a: .12, r: .38, sx: .00011, sy: .00019, px: .62, py: .02 },
+    { h: 160, a: .10, r: .34, sx: .00013, sy: .00015, px: .85, py: .10 },
+  ];
+  let mx = .5, my = .3;
+  addEventListener("pointermove", (e) => {
+    mx = e.clientX / innerWidth; my = e.clientY / innerHeight;
+  }, { passive: true });
+  (function frame() {
+    t += 16;
+    ctx.clearRect(0, 0, W, H);
+    ctx.globalCompositeOperation = "lighter";
+    blobs.forEach((b, i) => {
+      const x = (b.px + Math.sin(t * b.sx + i * 2.1) * .14 + (mx - .5) * .06) * W;
+      const y = (b.py + Math.cos(t * b.sy + i * 1.7) * .10 + (my - .3) * .04) * H;
+      const r = b.r * Math.max(W, H);
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `hsla(${b.h},80%,65%,${b.a})`);
+      g.addColorStop(1, "hsla(0,0%,0%,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    });
+    requestAnimationFrame(frame);
+  })();
+}
+// Neve: flocos leves caindo com deriva senoidal (pausa fora da aba).
+function initSnow() {
+  const cv = $("snow");
+  if (!cv || REDUCED || document.hidden) return;
+  const ctx = cv.getContext("2d");
+  const d = Math.min(1.5, devicePixelRatio || 1);
+  cv.width = innerWidth * d; cv.height = innerHeight * d;
+  const N = Math.min(90, Math.floor(innerWidth / 14));
+  const flakes = Array.from({ length: N }, () => ({
+    x: Math.random() * cv.width, y: Math.random() * cv.height,
+    r: (.6 + Math.random() * 1.8) * d, s: (.25 + Math.random() * .7) * d,
+    ph: Math.random() * 6.28, sw: (.3 + Math.random() * .8) * d, o: .25 + Math.random() * .5,
+  }));
+  let visible = true;
+  document.addEventListener("visibilitychange", () => { visible = !document.hidden; if (visible) requestAnimationFrame(frame); });
+  addEventListener("resize", () => { cv.width = innerWidth * d; cv.height = innerHeight * d; });
+  (function frame() {
+    if (!visible) return;
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = "#cfe6ff";
+    for (const f of flakes) {
+      f.y += f.s; f.ph += .008;
+      f.x += Math.sin(f.ph) * f.sw * .3;
+      if (f.y > cv.height + 4) { f.y = -4; f.x = Math.random() * cv.width; }
+      ctx.globalAlpha = f.o;
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, 6.29); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    requestAnimationFrame(frame);
+  })();
+}
+initAmbient();
+initSnow();
+
 /* ---------- navegação por views ---------- */
 const VIEWS = { overview: "Visão geral", entries: "Registros", compare: "Antes / Depois", goal: "Meta", forecast: "Estimativa", admin: "Usuários" };
 function go(view) {
-  for (const v of Object.keys(VIEWS)) $("view-" + v).classList.toggle("hidden", v !== view);
+  for (const v of Object.keys(VIEWS)) {
+    const el = $("view-" + v);
+    const show = v === view;
+    el.classList.toggle("hidden", !show);
+    if (show) { el.style.animation = "none"; void el.offsetWidth; el.style.animation = ""; }
+  }
   document.querySelectorAll("#sidenav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   $("crumb").textContent = VIEWS[view] || view;
   if (view === "compare") renderCompare(CACHE);
@@ -214,7 +313,7 @@ function renderStats(s) {
   pill.textContent = "confiança " + s.confianca;
   pill.className = "pill " + (s.confianca === "alta" ? "ok" : s.confianca === "média" ? "warn" : "");
   $("stats").innerHTML = `
-    <div class="hero"><b>${s.tmbEstimada}</b><span>kcal/dia ± ${s.margemTmb}</span></div>
+    <div class="hero"><b data-count="${s.tmbEstimada}">${s.tmbEstimada}</b><span>kcal/dia ± ${s.margemTmb}</span></div>
     <div class="range"><i style="width:100%"></i></div>
     <div class="range-lbl"><span>${s.tmbMin}</span><span>faixa de confiança 95%</span><span>${s.tmbMax}</span></div>
     <div class="props">
@@ -225,6 +324,8 @@ function renderStats(s) {
     </div>
     <p class="footline">${s.n} dias${s.totalN > s.n ? ` (últimos ${s.n} de ${s.totalN})` : ""} · ${s.diasAtipicos} atípico(s) · ${esc(s.firstWeight)} → ${esc(s.lastWeight)} kg</p>${warn}`;
   $("metodo").textContent = s.metodo;
+  countUp(document.querySelector("#stats .hero b"), s.tmbEstimada);
+  staggerChildren($("stats"), ".prop");
   // outliers → sugestão de marcar
   const ob = $("outliers");
   if (s.outliers && s.outliers.length) {
@@ -260,18 +361,54 @@ function renderChart(entries) {
   if (max - min < 1) { min -= 0.5; max += 0.5; }
   const X = (i) => 52 + (i * (W - 72)) / Math.max(1, pts.length - 1);
   const Y = (w) => 22 + (1 - (w - min) / (max - min)) * (H - 56);
-  ctx.font = "11px Inter, sans-serif";
-  const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, "rgba(139,147,248,.25)"); grad.addColorStop(1, "rgba(139,147,248,0)");
-  ctx.beginPath();
-  pts.forEach((e, i) => (i ? ctx.lineTo(X(i), Y(e.weight_kg)) : ctx.moveTo(X(i), Y(e.weight_kg))));
-  ctx.lineTo(X(pts.length - 1), H - 26); ctx.lineTo(X(0), H - 26); ctx.closePath();
-  ctx.fillStyle = grad; ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,.06)"; ctx.fillStyle = "#52565e"; ctx.lineWidth = 1;
-  for (let g = 0; g <= 4; g++) { const w = min + ((max - min) * g) / 4; ctx.beginPath(); ctx.moveTo(52, Y(w)); ctx.lineTo(W - 20, Y(w)); ctx.stroke(); ctx.fillText(w.toFixed(1), 10, Y(w) + 4); }
-  ctx.strokeStyle = "#8b93f8"; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
-  pts.forEach((e, i) => (i ? ctx.lineTo(X(i), Y(e.weight_kg)) : ctx.moveTo(X(i), Y(e.weight_kg))));
-  ctx.stroke(); ctx.lineWidth = 1;
+  // linha principal com brilho + desenho progressivo (efeito "draw");
+  // re-desenha só quando os dados mudam; hover não re-anima.
+  const drawKey = pts.map((e) => e.day + ":" + e.weight_kg).join("|");
+  const same = renderChart._key === drawKey;
+  renderChart._key = drawKey;
+  if (REDUCED || same || pts.length < 2) {
+    paintBase(); paintMain(1); paintOverlay();
+  } else {
+    const t0 = performance.now();
+    const dur = Math.min(900, 300 + pts.length * 40);
+    renderChart._raf && cancelAnimationFrame(renderChart._raf);
+    const frame = () => {
+      const p = Math.min(1, (performance.now() - t0) / dur);
+      const e = 1 - Math.pow(1 - p, 3);
+      ctx.clearRect(0, 0, W, H);
+      paintBase(); paintMain(e); paintOverlay();
+      if (p < 1) renderChart._raf = requestAnimationFrame(frame);
+    };
+    frame();
+  }
+  function paintBase() {
+    ctx.font = "11px Inter, sans-serif";
+    ctx.strokeStyle = "rgba(255,255,255,.06)"; ctx.fillStyle = "#52565e"; ctx.lineWidth = 1;
+    for (let g = 0; g <= 4; g++) { const w = min + ((max - min) * g) / 4; ctx.beginPath(); ctx.moveTo(52, Y(w)); ctx.lineTo(W - 20, Y(w)); ctx.stroke(); ctx.fillText(w.toFixed(1), 10, Y(w) + 4); }
+  }
+  function paintMain(p) {
+    const n = Math.max(2, Math.ceil(pts.length * p));
+    const seg = pts.slice(0, n);
+    // área (fade-in com o progresso)
+    ctx.save();
+    ctx.globalAlpha = .25 + .75 * p;
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, "rgba(139,147,248,.25)"); grad.addColorStop(1, "rgba(139,147,248,0)");
+    ctx.beginPath();
+    seg.forEach((e, i) => (i ? ctx.lineTo(X(i), Y(e.weight_kg)) : ctx.moveTo(X(i), Y(e.weight_kg))));
+    ctx.lineTo(X(seg.length - 1), H - 26); ctx.lineTo(X(0), H - 26); ctx.closePath();
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.restore();
+    // brilho sob a linha + linha principal
+    ctx.save();
+    ctx.shadowColor = "rgba(139,147,248,.7)"; ctx.shadowBlur = 10;
+    ctx.strokeStyle = "#8b93f8"; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
+    seg.forEach((e, i) => (i ? ctx.lineTo(X(i), Y(e.weight_kg)) : ctx.moveTo(X(i), Y(e.weight_kg))));
+    ctx.stroke();
+    ctx.restore();
+    ctx.lineWidth = 1;
+  }
+  function paintOverlay() {
   // linha do ESPERADO (reta ajustada, pontilhada branca) a partir da trajetória
   const traj = (STATS && STATS.trajetoria) || [];
   const expByDay = Object.fromEntries(traj.map((t) => [t.day, t.esperado]));
@@ -312,7 +449,8 @@ function renderChart(entries) {
   });
   ctx.fillStyle = "#52565e";
   pts.forEach((e, i) => { if (i % Math.ceil(pts.length / 8) === 0) ctx.fillText(e.day.slice(5), X(i) - 12, H - 8); });
-}
+  } // paintOverlay
+} // renderChart
 
 /* ---------- registros como issues ---------- */
 function filteredEntries(entries) {
@@ -357,6 +495,7 @@ function renderEntries(entries) {
     </div>
     ${open ? detailHtml(e) : ""}`;
   }).join("");
+  staggerChildren(box, ".rowline");
   box.querySelectorAll(".rowline").forEach((el) => {
     const id = Number(el.dataset.id);
     el.onclick = (ev) => {
@@ -609,3 +748,5 @@ $("c-today").onclick = async () => {
 };
 
 boot();
+
+

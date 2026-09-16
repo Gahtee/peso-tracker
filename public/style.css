@@ -1,6 +1,8 @@
 /* ————— Peso Tracker · design system espelhado no app Linear —————
    sidebar fixa, lista de issues em linhas, painel de detalhe, ⌘K-ish filter,
-   pills de status, tipografia Inter 13px, bordas hairline, zero gradientes. */
+   pills de status, tipografia Inter 13px, bordas hairline.
+   Camada de movimento "iglu": aurora + neve + micro-interações (só CSS/JS
+   próprio, sem CDN — respeita prefers-reduced-motion). */
 :root{
   --bg0:#08090a;            /* app bg           */
   --bg1:#0e0f11;            /* sidebar          */
@@ -18,14 +20,29 @@
   --ok:#4cc38a;
   --warn:#f2c94c;
   --err:#eb5757;
+  --ice:#9fd8ff;            /* brilho "gelo" da aurora */
   --r:8px;
   --side:248px;
   --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  --ease:cubic-bezier(.22,.61,.21,1);
 }
 *{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
 body{margin:0;background:var(--bg0);color:var(--ink);font:13px/1.5 var(--font);
-  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;overflow-x:hidden}
+::selection{background:rgba(94,106,210,.4)}
+
+/* ————— camada ambiente: aurora ("iglu") + neve + grão ————— */
+#ambient{position:fixed;inset:0;width:100vw;height:100vh;z-index:0;pointer-events:none;opacity:.9}
+#snow{position:fixed;inset:0;width:100vw;height:100vh;z-index:1;pointer-events:none;opacity:.55}
+.grain{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.05;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E")}
+#login,#app{position:relative;z-index:2}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+  #ambient,#snow,.grain{display:none}
+}
 h1{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0 0 4px}
 h2{font-size:14px;font-weight:600;margin:0 0 2px}
 button{font-family:var(--font)}
@@ -36,10 +53,19 @@ button{font-family:var(--font)}
 
 /* ————— login: janela centrada mínima, como linear.app/login ————— */
 #login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
-.login-inner{width:100%;max-width:320px}
+.login-inner{width:100%;max-width:320px;animation:rise .5s var(--ease) both}
+.login-inner .lbl{animation:rise .5s var(--ease) both}
+.login-inner .lbl:nth-of-type(1){animation-delay:.06s}
+.login-inner .lbl:nth-of-type(2){animation-delay:.12s}
+#l-btn{animation:rise .5s var(--ease) .18s both;transition:transform .15s var(--ease),filter .15s,box-shadow .2s}
+#l-btn:hover{filter:brightness(1.12);box-shadow:0 4px 24px rgba(94,106,210,.45)}
+#l-btn:active{transform:scale(.98)}
 .login-logo{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px;margin-bottom:28px}
-.mark{width:24px;height:24px;border-radius:7px;background:var(--acc);flex:none;
-  box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)}
+.mark{width:24px;height:24px;border-radius:7px;background:linear-gradient(135deg,var(--acc-hi),var(--acc) 60%,#3d47b8);flex:none;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.25),0 0 14px rgba(94,106,210,.55);
+  animation:markGlow 4s ease-in-out infinite}
+@keyframes markGlow{0%,100%{box-shadow:inset 0 0 0 1px rgba(255,255,255,.25),0 0 10px rgba(94,106,210,.4)}50%{box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),0 0 20px rgba(159,216,255,.6)}}
+.ws .mark{animation:markGlow 4s ease-in-out infinite}
 #login h1{font-size:20px}
 .login-sub{color:var(--mut);font-size:13px;margin:4px 0 20px}
 
@@ -57,10 +83,15 @@ button{font-family:var(--font)}
 .side-nav{padding:8px;display:grid;gap:1px;flex:1;align-content:start;overflow-y:auto}
 .side-nav button{
   display:flex;align-items:center;gap:9px;width:100%;text-align:left;cursor:pointer;
-  background:none;border:0;border-radius:6px;color:var(--mut);font-size:13px;padding:6px 9px}
-.side-nav button i{font-style:normal;width:16px;text-align:center;color:var(--faint);font-size:12px}
+  background:none;border:0;border-radius:6px;color:var(--mut);font-size:13px;padding:6px 9px;
+  position:relative;transition:background .15s,color .15s,transform .15s var(--ease)}
+.side-nav button i{font-style:normal;width:16px;text-align:center;color:var(--faint);font-size:12px;transition:color .15s,transform .2s var(--ease)}
 .side-nav button:hover{background:var(--bg3);color:var(--ink2)}
+.side-nav button:hover i{transform:scale(1.15)}
+.side-nav button:active{transform:scale(.98)}
 .side-nav button.active{background:rgba(255,255,255,.07);color:var(--ink)}
+.side-nav button.active::before{content:"";position:absolute;left:-8px;top:6px;bottom:6px;width:2px;border-radius:2px;
+  background:linear-gradient(var(--acc-hi),var(--ice));box-shadow:0 0 8px rgba(139,147,248,.8)}
 .side-nav button.active i{color:var(--acc-hi)}
 .side-nav .count{margin-left:auto;font-size:11px;color:var(--faint);background:rgba(255,255,255,.06);
   border-radius:9px;padding:0 7px;line-height:18px}
@@ -79,6 +110,23 @@ button{font-family:var(--font)}
 .search::placeholder{color:var(--faint)}
 .search:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-dim)}
 .content{padding:20px 24px 80px;max-width:1100px;width:100%;margin:0 auto;display:grid;gap:12px}
+
+/* ————— movimento: entrada das views + painéis ————— */
+.view{animation:viewIn .32s var(--ease) both}
+.view.hidden{display:none!important;animation:none}
+@keyframes viewIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.panel{transition:transform .25s var(--ease),box-shadow .25s,border-color .2s}
+.panel:hover{border-color:rgba(255,255,255,.09)}
+#stats-card{position:relative;overflow:hidden}
+#stats-card::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+  background:radial-gradient(420px 160px at 12% -40px,rgba(94,106,210,.16),transparent 70%),
+             radial-gradient(380px 150px at 88% -30px,rgba(159,216,255,.09),transparent 70%)}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.hero b{font-variant-numeric:tabular-nums}
+
+/* staggered: linhas da lista entram em cascata (classe .fx-in via JS) */
+@keyframes rowIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.fx-in{animation:rowIn .3s var(--ease) both}
 
 /* ————— painéis: o "issue detail" do Linear ————— */
 .panel{background:var(--bg2);border:1px solid var(--line2);border-radius:var(--r);padding:20px}
@@ -114,7 +162,8 @@ button{font-family:var(--font)}
 /* ————— lista de registros = lista de issues ————— */
 .list-head,.rowline{display:grid;grid-template-columns:110px 90px 80px 1fr auto;gap:12px;align-items:center;padding:0 16px}
 .list-head{font-size:11px;color:var(--faint);font-weight:500;padding-top:10px;padding-bottom:8px;border-bottom:1px solid var(--line2)}
-.rowline{min-height:48px;padding-top:7px;padding-bottom:7px;border-bottom:1px solid var(--line2);cursor:pointer}
+.rowline{min-height:48px;padding-top:7px;padding-bottom:7px;border-bottom:1px solid var(--line2);cursor:pointer;
+  transition:background .15s,transform .15s var(--ease)}
 .rowline:last-child{border-bottom:0}
 .rowline:hover{background:rgba(255,255,255,.025)}
 .rowline .rid{font-variant-numeric:tabular-nums;color:var(--mut);font-size:12px;white-space:nowrap}
@@ -123,7 +172,10 @@ button{font-family:var(--font)}
 .rowline .rn{color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
 .rowline .rn .sub{color:var(--faint)}
 .rowline .rm{display:flex;gap:4px;align-items:center}
-.mini{width:30px;height:30px;border-radius:6px;object-fit:cover;background:#000;border:1px solid var(--line);cursor:zoom-in}
+.mini{width:30px;height:30px;border-radius:6px;object-fit:cover;background:#000;border:1px solid var(--line);cursor:zoom-in;
+  transition:transform .15s var(--ease)}
+.mini:hover{transform:scale(1.12)}
+.thumb img:hover,.thumb video:hover{transform:scale(1.04);box-shadow:0 6px 24px rgba(0,0,0,.5);border-color:rgba(139,147,248,.4)}
 .mini.more{display:inline-flex;align-items:center;justify-content:center;color:var(--mut);font-size:11px;background:var(--bg3)}
 .rowline .ract{margin-left:8px;display:none;gap:4px}
 .rowline:hover .ract{display:flex}
@@ -134,11 +186,13 @@ button{font-family:var(--font)}
 .empty{padding:32px;text-align:center;color:var(--faint)}
 
 /* detalhe expandido da linha (mídias grandes + ações) */
-.detail{border-bottom:1px solid var(--line2);padding:4px 16px 16px 122px;background:rgba(255,255,255,.012)}
+.detail{border-bottom:1px solid var(--line2);padding:4px 16px 16px 122px;background:rgba(255,255,255,.012);
+  animation:viewIn .25s var(--ease) both}
 .detail .flag-list{color:var(--mut);font-size:12px;margin:2px 0 8px}
 .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .thumb{position:relative}
-.thumb img,.thumb video{width:120px;height:120px;object-fit:cover;border-radius:8px;background:#000;display:block;border:1px solid var(--line);cursor:zoom-in}
+.thumb img,.thumb video{width:120px;height:120px;object-fit:cover;border-radius:8px;background:#000;display:block;border:1px solid var(--line);cursor:zoom-in;
+  transition:transform .2s var(--ease),box-shadow .2s,border-color .2s}
 .thumb i{position:absolute;top:4px;right:6px;font-style:normal;background:rgba(0,0,0,.7);color:#fff;
   border-radius:50%;width:20px;height:20px;text-align:center;line-height:20px;cursor:pointer;font-size:12px}
 
@@ -202,20 +256,28 @@ button{font-family:var(--font)}
 .flag input:focus-visible+span{box-shadow:0 0 0 3px var(--acc-dim)}
 
 /* botões */
-.btn-primary{padding:7px 14px;border:0;border-radius:6px;cursor:pointer;background:var(--acc);
-  color:#fff;font-weight:500;font-size:13px;box-shadow:inset 0 1px 0 rgba(255,255,255,.16)}
-.btn-primary:hover{filter:brightness(1.12)}
+.btn-primary{padding:7px 14px;border:0;border-radius:6px;cursor:pointer;background:linear-gradient(180deg,var(--acc-hi),var(--acc) 55%,#4a55c4);
+  color:#fff;font-weight:500;font-size:13px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 2px 14px rgba(94,106,210,.35);
+  transition:transform .12s var(--ease),filter .15s,box-shadow .2s}
+.btn-primary:hover{filter:brightness(1.1);box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 4px 22px rgba(94,106,210,.5)}
+.btn-primary:active{transform:scale(.97)}
 .btn-primary:disabled{opacity:.6;cursor:wait}
 .btn-block{width:100%}
 .btn-ghost{padding:6px 12px;border-radius:6px;cursor:pointer;background:rgba(255,255,255,.04);
-  color:var(--ink2);border:1px solid var(--line);font-size:12px;font-weight:500}
-.btn-ghost:hover{background:rgba(255,255,255,.08)}
+  color:var(--ink2);border:1px solid var(--line);font-size:12px;font-weight:500;
+  transition:background .15s,transform .12s var(--ease),border-color .15s,box-shadow .2s}
+.btn-ghost:hover{background:rgba(255,255,255,.08);border-color:rgba(139,147,248,.35);box-shadow:0 2px 12px rgba(94,106,210,.25)}
+.btn-ghost:active{transform:scale(.96)}
 .btn-quiet{background:none;border:0;color:var(--faint);font-size:12px;cursor:pointer;padding:6px;border-radius:6px}
 .btn-quiet:hover{color:var(--ink2);background:var(--bg3)}
 
 /* diálogos */
-dialog{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:0;color:var(--ink);width:min(520px,94vw)}
-dialog::backdrop{background:rgba(0,0,0,.6)}
+dialog{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:0;color:var(--ink);width:min(520px,94vw);
+  box-shadow:0 24px 80px rgba(0,0,0,.6),0 0 0 1px rgba(139,147,248,.06),0 0 60px rgba(94,106,210,.12)}
+dialog::backdrop{background:rgba(0,0,0,.6);backdrop-filter:blur(3px)}
+dialog[open]{animation:dlgIn .28s var(--ease) both}
+@keyframes dlgIn{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:none}}
+#lightbox[open] img{animation:viewIn .3s var(--ease) both}
 .dlg{padding:20px}
 .dlg h2{font-size:15px;margin:0 0 6px}
 .dlg-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}

@@ -4,11 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#08090a">
 <title>Peso Tracker</title>
 <link rel="stylesheet" href="/style.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%235e6ad2'/%3E%3Cpath d='M16 7v13m0 0l-5-5m5 5l5-5M8 24h16' stroke='white' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
 <body>
+<canvas id="ambient" aria-hidden="true"></canvas>
+<canvas id="snow" aria-hidden="true"></canvas>
+<div class="grain" aria-hidden="true"></div>
 
 <!-- LOGIN -->
 <section id="login" class="hidden">
