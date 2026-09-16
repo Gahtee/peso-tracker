@@ -225,6 +225,7 @@ $("new-day").onclick = () => {
   $("f-day").value = new Date().toISOString().slice(0, 10);
   $("dlg-day").showModal();
 };
+$("new-day-hero").onclick = () => $("new-day").click();
 $("day-form").addEventListener("submit", async (ev) => {
   if (ev.submitter && ev.submitter.value === "cancel") return; // fecha sem salvar
   ev.preventDefault();
