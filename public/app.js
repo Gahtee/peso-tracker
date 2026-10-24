@@ -161,7 +161,25 @@ initAmbient();
 initSnow();
 
 /* ---------- navegação por views ---------- */
-const VIEWS = { overview: "Visão geral", entries: "Registros", compare: "Antes / Depois", goal: "Meta", forecast: "Estimativa", admin: "Usuários" };
+const VIEWS = { overview: "Visão geral", entries: "Registros", measures: "Medidas", compare: "Antes / Depois", goal: "Meta", forecast: "Estimativa", admin: "Usuários" };
+let MEAS_SEL = null; // medida selecionada (cartão + gráfico + rótulo no boneco)
+const MEASURES = [
+  { k: "pulso", label: "Pulso", hint: "ao redor do punho", dot: [167, 184], fix: false },
+  { k: "cintura", label: "Cintura", hint: "linha mais estreita", dot: [131, 158], fix: false },
+  { k: "abdomen", label: "Abdômen", hint: "na altura do umbigo", dot: [131, 180], fix: false },
+  { k: "quadril", label: "Quadril", hint: "parte mais larga", dot: [134, 204], fix: false },
+  { k: "busto", label: "Busto", hint: "na altura dos mamilos", dot: [131, 112], fix: false },
+  { k: "torax", label: "Tórax", hint: "abaixo do busto", dot: [131, 136], fix: false },
+  { k: "coxas", label: "Coxas", hint: "parte mais larga", dot: [126, 252], fix: false },
+  { k: "bracos", label: "Braços", hint: "bíceps relaxado", dot: [156, 124], fix: false },
+  { k: "ombros", label: "Ombros", hint: "ombro a ombro", dot: [144, 84], fix: true },
+  { k: "braco_len", label: "Comprimento dos braços", hint: "ombro ao punho", dot: [58, 150], fix: true },
+  { k: "perna_len", label: "Comprimento das pernas", hint: "virilha ao tornozelo", dot: [91, 310], fix: true },
+  { k: "altura", label: "Altura", hint: "do topo ao chão", dot: [110, 18], fix: true },
+  { k: "gancho", label: "Gancho (cavalo)", hint: "entrepernas", dot: [110, 226], fix: true },
+  { k: "busto_gap", label: "Entre mamilos", hint: "distância entre mamilos", dot: [110, 116], fix: true },
+];
+const FIX_INPUT = { ombros: "fx-ombros", braco_len: "fx-braco", perna_len: "fx-perna", altura: "fx-altura", gancho: "fx-gancho", busto_gap: "fx-busto-gap" };
 function go(view) {
   for (const v of Object.keys(VIEWS)) {
     const el = $("view-" + v);
@@ -174,6 +192,7 @@ function go(view) {
   if (view === "compare") renderCompare(CACHE);
   if (view === "goal") renderGoal();
   if (view === "forecast") renderForecast();
+  if (view === "measures") renderMeasures();
 }
 document.querySelectorAll("#sidenav button").forEach((b) => { b.onclick = () => go(b.dataset.view); });
 $("q").addEventListener("input", () => renderEntries(CACHE));
@@ -220,6 +239,28 @@ $("l-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") $("l-btn
 $("l-user").addEventListener("keydown", (e) => { if (e.key === "Enter") $("l-btn").click(); });
 
 /* ---------- novo dia (modal) ---------- */
+const MEAS_INPUT = ["pulso", "cintura", "abdomen", "quadril", "busto", "torax", "coxas", "bracos"];
+function readMeasInputs(prefix) {
+  const medidas = {};
+  for (const k of MEAS_INPUT) {
+    const el = $(`${prefix}-m-${k}`);
+    const raw = el ? el.value.trim().replace(",", ".") : "";
+    if (raw !== "") medidas[k] = Number(raw);
+  }
+  return medidas;
+}
+function fillMeasInputs(prefix, medidas) {
+  for (const k of MEAS_INPUT) {
+    const el = $(`${prefix}-m-${k}`);
+    if (el) el.value = (medidas && medidas[k] != null) ? medidas[k] : "";
+  }
+}
+function clearMeasInputs(prefix) {
+  for (const k of MEAS_INPUT) {
+    const el = $(`${prefix}-m-${k}`);
+    if (el) el.value = "";
+  }
+}
 $("new-day").onclick = () => {
   $("f-err").textContent = "";
   $("f-day").value = new Date().toISOString().slice(0, 10);
@@ -237,7 +278,7 @@ $("day-form").addEventListener("submit", async (ev) => {
       day: $("f-day").value, weight_kg: Number($("f-weight").value),
       calories: Number($("f-cal").value), exercise_kcal: Number($("f-ex").value || 0),
       exercise_src: $("f-exsrc").value,
-      note: $("f-note").value, flagsKeys: checkedFlags("#f-flags") }) });
+      note: $("f-note").value, flagsKeys: checkedFlags("#f-flags"), medidas: readMeasInputs("#f") }) });
     const files = $("f-media").files;
     let upErr = "";
     if (files && files.length) {
@@ -250,6 +291,7 @@ $("day-form").addEventListener("submit", async (ev) => {
       }
     }
     $("f-weight").value = ""; $("f-cal").value = ""; $("f-ex").value = ""; $("f-note").value = ""; $("f-media").value = "";
+    clearMeasInputs("#f");
     document.querySelectorAll("#f-flags input:checked").forEach((c) => (c.checked = false));
     $("dlg-day").close();
     await refresh();
@@ -270,6 +312,7 @@ function openEdit(e) {
   $("e-exsrc").value = e.exercise_src || "est";
   $("e-note").value = e.note || "";
   $("e-flags").innerHTML = "<legend>Dia atípico?</legend>" + flagsHTML(e.flags | 0);
+  fillMeasInputs("#e", measuresOf(e));
   $("e-err").textContent = "";
   $("dlg-edit").showModal();
 }
@@ -282,7 +325,7 @@ $("edit-form").addEventListener("submit", async (ev) => {
     await api(`/api/entries/${EDIT_ID}`, { method: "PUT", body: JSON.stringify({
       weight_kg: Number($("e-weight").value), calories: Number($("e-cal").value),
       exercise_kcal: Number($("e-ex").value || 0), exercise_src: $("e-exsrc").value,
-      note: $("e-note").value, flags }) });
+      note: $("e-note").value, flags, medidas: readMeasInputs("#e") }) });
     $("dlg-edit").close();
     refresh();
   } catch (e) { $("e-err").textContent = e.message; }
@@ -298,7 +341,7 @@ async function refresh() {
   STATS = stats; PROFILE = profile;
   CACHE = data.entries || [];
   $("nav-count").textContent = CACHE.length || "";
-  renderStats(stats); renderChart(CACHE); renderEntries(CACHE); renderCompare(CACHE); renderGoal();
+  renderStats(stats); renderChart(CACHE); renderEntries(CACHE); renderCompare(CACHE); renderGoal(); renderMeasures();
 }
 
 function renderStats(s) {
@@ -452,6 +495,130 @@ function renderChart(entries) {
   pts.forEach((e, i) => { if (i % Math.ceil(pts.length / 8) === 0) ctx.fillText(e.day.slice(5), X(i) - 12, H - 8); });
   } // paintOverlay
 } // renderChart
+
+function measuresOf(e) {
+  return (e && e.medidas) || {};
+}
+function collectMeasure(key) {
+  // pares (dia, valor) só com registros que têm a medida — ordem crescente
+  return [...CACHE].reverse()
+    .filter((e) => { const v = measuresOf(e)[key]; return v !== null && v !== undefined && v !== ""; })
+    .map((e) => ({ day: e.day, v: Number(measuresOf(e)[key]) }));
+}
+function lastMeasure(key) {
+  // mais recente primeiro (CACHE já vem DESC)
+  for (const e of CACHE) {
+    const v = measuresOf(e)[key];
+    if (v !== null && v !== undefined && v !== "") return { entry: e, v: Number(v) };
+  }
+  return null;
+}
+function fmtCm(v) {
+  return (v === null || v === undefined || v === "") ? "—" : `${Number(v).toFixed(1)} cm`;
+}
+function measCur(m) {
+  if (m.fix) { const v = ((PROFILE && PROFILE.fix) || {})[m.k]; return v != null ? { v: Number(v) } : null; }
+  const pts = collectMeasure(m.k);
+  return pts.length ? pts[pts.length - 1] : null;
+}
+function selectMeasure(k) { MEAS_SEL = k; renderMeasures(); }
+
+function renderMeasures() {
+  if (!MEAS_SEL) MEAS_SEL = (MEASURES.find((m) => !m.fix && collectMeasure(m.k).length) || MEASURES[0]).k;
+  const sel = MEASURES.find((m) => m.k === MEAS_SEL);
+  const sc = measCur(sel);
+
+  // boneco: pontos + rótulo só da medida selecionada
+  $("meas-dots").innerHTML = MEASURES.map((m) => {
+    const c = measCur(m);
+    return `<circle class="dot${c ? " has" : ""}${m.fix ? " fixd" : ""}${m.k === MEAS_SEL ? " hot" : ""}" data-k="${m.k}" cx="${m.dot[0]}" cy="${m.dot[1]}" r="7" tabindex="0" role="button" aria-label="${esc(m.label)}"><title>${esc(m.label)}${c ? " — " + c.v.toFixed(1) + " cm" : ""}</title></circle>`;
+  }).join("");
+  $("meas-labels").innerHTML = sc
+    ? `<line class="lead" x1="${sel.dot[0] + 8}" y1="${sel.dot[1]}" x2="184" y2="${sel.dot[1]}"/><text class="vlabel" x="188" y="${sel.dot[1] + 4}">${sc.v.toFixed(1)} cm</text>`
+    : "";
+  $("meas-dots").querySelectorAll(".dot").forEach((d) => {
+    d.onclick = () => selectMeasure(d.dataset.k);
+    d.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); selectMeasure(d.dataset.k); } };
+  });
+
+  // cartão de detalhe
+  const pts = sel.fix ? [] : collectMeasure(sel.k);
+  const last = pts[pts.length - 1], prev = pts[pts.length - 2];
+  let body;
+  if (sel.fix) {
+    body = `<div class="md-val">${sc ? `${sc.v.toFixed(1)}<small>cm</small>` : `<span class="md-empty">Sem medição</span>`}</div>
+      <p class="muted small">Medida fixa — edite em Configurações do usuário.</p>`;
+  } else {
+    const d = last && prev ? last.v - prev.v : null;
+    const cls = d === null ? "" : d < 0 ? "delta-neg" : d > 0 ? "delta-pos" : "";
+    body = `<div class="md-val">${last ? `${last.v.toFixed(1)}<small>cm</small>` : `<span class="md-empty">Sem medição</span>`}${d !== null ? `<span class="md-delta ${cls}">${d > 0 ? "+" : ""}${d.toFixed(1)} cm</span>` : ""}</div>
+      <p class="muted small">${last ? "Última medição: " + esc(last.day) + (prev ? " · anterior " + prev.v.toFixed(1) + " em " + esc(prev.day) : "") : "Ainda sem medições — preencha no formulário de registro (1x por semana basta)."}</p>
+      ${last ? `<label class="md-edit">Corrigir último valor <input id="meas-edit" type="number" step="0.1" min="5" max="300" inputmode="decimal" value="${last.v.toFixed(1)}"></label>` : ""}`;
+  }
+  $("meas-detail").innerHTML = `<p class="kicker">${sel.fix ? "Medida fixa" : "Medida variável"}</p><h3>${esc(sel.label)}</h3><p class="muted small">${esc(sel.hint)}</p>${body}`;
+
+  const ed = $("meas-edit");
+  if (ed && last) ed.onchange = async () => {
+    const v = ed.value.trim() === "" ? null : Number(ed.value.replace(",", "."));
+    if (v !== null && !(v >= 5 && v <= 300)) { ed.value = last.v.toFixed(1); return; }
+    const cur = CACHE.find((x) => x.day === last.day);
+    if (!cur) return;
+    try {
+      await api(`/api/entries/${cur.id}`, { method: "PUT", body: JSON.stringify({
+        weight_kg: cur.weight_kg, calories: cur.calories, exercise_kcal: cur.exercise_kcal || 0,
+        exercise_src: cur.exercise_src || "est", note: cur.note || "", flags: cur.flags | 0,
+        medidas: { ...measuresOf(cur), [sel.k]: v } }) });
+      await refresh();
+    } catch (e) { ed.value = last.v.toFixed(1); }
+  };
+
+  // lista compacta (chips) — também seleciona
+  const chip = (m) => { const c = measCur(m); return `<button class="mchip${m.k === MEAS_SEL ? " on" : ""}" data-k="${m.k}"><span>${esc(m.label)}</span><b>${c ? c.v.toFixed(1) : "—"}</b></button>`; };
+  $("meas-list").innerHTML =
+    `<p class="kicker">Variáveis</p><div class="mchips">${MEASURES.filter((m) => !m.fix).map(chip).join("")}</div>
+     <p class="kicker">Fixas</p><div class="mchips">${MEASURES.filter((m) => m.fix).map(chip).join("")}</div>`;
+  $("meas-list").querySelectorAll(".mchip").forEach((b) => { b.onclick = () => selectMeasure(b.dataset.k); });
+
+  // gráfico só para medidas variáveis com dados
+  $("meas-chart-wrap").style.display = (sel.fix || !last) ? "none" : "";
+  if (!sel.fix && last) renderMeasureChart();
+}
+function renderMeasureChart() {
+  const c = $("meas-chart");
+  if (!c) return;
+  const ctx = c.getContext("2d");
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const W = 900, H = 220;
+  if (c.width !== W * dpr) { c.width = W * dpr; c.height = H * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const meta = MEASURES.find((m) => m.k === MEAS_SEL);
+  $("meas-chart-title").textContent = meta ? `Evolução — ${meta.label.toLowerCase()}` : "Selecione uma medida";
+  const pts = collectMeasure(MEAS_SEL);
+  if (pts.length < 1) { ctx.fillStyle = "#52565e"; ctx.font = "12px Inter, sans-serif"; ctx.fillText("Sem dados para esta medida", 24, 40); return; }
+  const vs = pts.map((p) => p.v);
+  let min = Math.min(...vs), max = Math.max(...vs);
+  if (max - min < 1) { min -= 0.5; max += 0.5; }
+  const X = (i) => 56 + (i * (W - 76)) / Math.max(1, pts.length - 1);
+  const Y = (v) => 18 + (1 - (v - min) / (max - min)) * (H - 52);
+  ctx.font = "11px Inter, sans-serif";
+  ctx.strokeStyle = "rgba(255,255,255,.06)"; ctx.fillStyle = "#52565e"; ctx.lineWidth = 1;
+  for (let g = 0; g <= 4; g++) { const v = min + ((max - min) * g) / 4; ctx.beginPath(); ctx.moveTo(56, Y(v)); ctx.lineTo(W - 20, Y(v)); ctx.stroke(); ctx.fillText(v.toFixed(1), 8, Y(v) + 4); }
+  ctx.save();
+  ctx.strokeStyle = "#8b93f8"; ctx.lineWidth = 2; ctx.lineJoin = "round";
+  ctx.shadowColor = "rgba(139,147,248,.7)"; ctx.shadowBlur = 8;
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(X(i), Y(p.v)) : ctx.moveTo(X(i), Y(p.v))));
+  ctx.stroke();
+  ctx.restore();
+  pts.forEach((p, i) => {
+    ctx.beginPath(); ctx.arc(X(i), Y(p.v), 4, 0, 7);
+    ctx.fillStyle = "#8b93f8"; ctx.fill();
+    ctx.strokeStyle = "#0e0f11"; ctx.stroke();
+  });
+  ctx.fillStyle = "#52565e";
+  pts.forEach((p, i) => { if (i % Math.ceil(pts.length / 10) === 0) ctx.fillText(p.day.slice(5), X(i) - 12, H - 8); });
+}
 
 /* ---------- registros como issues ---------- */
 function filteredEntries(entries) {
@@ -669,6 +836,12 @@ function renderGoal() {
   $("c-on").checked = !!PROFILE.cycle_enabled;
   $("c-last").value = PROFILE.cycle_last ?? "";
   $("c-len").value = PROFILE.cycle_len ?? 28;
+  // medidas fixas (perfil)
+  const fx = PROFILE.fix || {};
+  for (const [k, id] of Object.entries(FIX_INPUT)) {
+    const el = $(id);
+    if (el && document.activeElement !== el) el.value = fx[k] ?? "";
+  }
   const box = $("goal-box");
   const s = STATS;
   if (!PROFILE.goal_kg) {
@@ -712,6 +885,11 @@ $("g-btn").onclick = async () => {
   $("g-err").textContent = "";
   try {
     const cycLen = $("c-len").value === "" ? 28 : Number($("c-len").value);
+    const fix = {};
+    for (const [k, id] of Object.entries(FIX_INPUT)) {
+      const raw = $(id).value.trim().replace(",", ".");
+      if (raw !== "") fix[k] = Number(raw);
+    }
     await api("/api/profile", { method: "PUT", body: JSON.stringify({
       goal_kg: $("g-kg").value === "" ? null : Number($("g-kg").value),
       goal_day: $("g-day").value || null,
@@ -719,6 +897,7 @@ $("g-btn").onclick = async () => {
       cycle_enabled: $("c-on").checked,
       cycle_last: $("c-last").value || null,
       cycle_len: cycLen,
+      fix,
     }) });
     await refresh();
   } catch (e) { $("g-err").textContent = e.message; }

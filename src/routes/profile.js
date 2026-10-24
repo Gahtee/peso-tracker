@@ -2,9 +2,37 @@ import { db } from "../db.js";
 import { ACTIVITY_LEVELS, FLAGS } from "../config.js";
 import { json, secHeaders } from "../http.js";
 import { readBody } from "./helpers.js";
-import { validDateString, validDay, validWeight } from "../validation.js";
+import { validCm, validDateString, validDay, validWeight } from "../validation.js";
 import { FASE_LABEL, cyclePhase, getProfile } from "../cycle.js";
 import { statsFor } from "../stats.js";
+
+// Medidas fixas (cm) — chaves da API -> colunas do profile
+export const FIX_KEYS = {
+  ombros: "fix_ombros",
+  braco_len: "fix_braco_len",
+  perna_len: "fix_perna_len",
+  altura: "fix_altura",
+  gancho: "fix_gancho",
+  busto_gap: "fix_busto_gap",
+};
+
+function readFix(body) {
+  const src = body.medidas_fix ?? body.fix ?? {};
+  const out = {};
+  for (const [k, col] of Object.entries(FIX_KEYS)) {
+    const raw = src[k] !== undefined ? src[k] : body["fix_" + k];
+    const v = validCm(raw);
+    if (v === undefined) return { error: `medida fixa "${k}" inválida (5–300 cm)` };
+    out[col] = v;
+  }
+  return { out };
+}
+
+function fixToApi(pr) {
+  const out = {};
+  for (const [k, col] of Object.entries(FIX_KEYS)) out[k] = pr[col] ?? null;
+  return out;
+}
 
 export function handleFlags(res) {
   return json(res, 200, { flags: Object.fromEntries(Object.entries(FLAGS).map(([k, v]) => [k, v.label])) });
@@ -15,6 +43,7 @@ export function handleGetProfile(res, sess) {
   return json(res, 200, {
     goal_kg: pr.goal_kg, goal_day: pr.goal_day, activity: pr.activity, levels: ACTIVITY_LEVELS,
     cycle_enabled: !!pr.cycle_enabled, cycle_last: pr.cycle_last, cycle_len: pr.cycle_len || 28,
+    fix: fixToApi(pr),
   });
 }
 
@@ -34,9 +63,11 @@ export async function handlePutProfile(req, res, sess) {
   if (cycLast && !validDateString(cycLast)) return json(res, 400, { error: "data do ciclo inválida" });
   if (cycLast && cycLast > new Date().toISOString().slice(0, 10)) return json(res, 400, { error: "data do ciclo não pode ser futura" });
   if (!(cycLen >= 20 && cycLen <= 45)) return json(res, 400, { error: "duração do ciclo inválida (20–45 dias)" });
+  const r = readFix(body);
+  if (r.error) return json(res, 400, { error: r.error });
   getProfile(sess.user_id);
-  db.prepare("UPDATE profile SET goal_kg=?, goal_day=?, activity=?, cycle_enabled=?, cycle_last=?, cycle_len=?, updated_at=? WHERE user_id=?")
-    .run(goalKg, goalDay, act, cycOn ? 1 : 0, cycLast, cycLen, Date.now(), sess.user_id);
+  db.prepare("UPDATE profile SET goal_kg=?, goal_day=?, activity=?, cycle_enabled=?, cycle_last=?, cycle_len=?, updated_at=?, fix_ombros=?, fix_braco_len=?, fix_perna_len=?, fix_altura=?, fix_gancho=?, fix_busto_gap=? WHERE user_id=?")
+    .run(goalKg, goalDay, act, cycOn ? 1 : 0, cycLast, cycLen, Date.now(), r.out.fix_ombros, r.out.fix_braco_len, r.out.fix_perna_len, r.out.fix_altura, r.out.fix_gancho, r.out.fix_busto_gap, sess.user_id);
   return json(res, 200, { ok: true });
 }
 
@@ -84,12 +115,12 @@ export function handleStats(url, res, sess) {
 }
 
 export function handleExportCsv(res, sess) {
-  const rows = db.prepare("SELECT day, weight_kg, calories, exercise_kcal, exercise_src, flags, note FROM entries WHERE user_id=? ORDER BY day ASC").all(sess.user_id);
+  const rows = db.prepare("SELECT day, weight_kg, calories, exercise_kcal, exercise_src, flags, note, m_pulso, m_cintura, m_abdomen, m_quadril, m_busto, m_torax, m_coxas, m_bracos FROM entries WHERE user_id=? ORDER BY day ASC").all(sess.user_id);
   const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = ["data,peso_kg,calorias,exercicio_kcal,exercicio_fonte,atipico,nota"];
+  const lines = ["data,peso_kg,calorias,exercicio_kcal,exercicio_fonte,atipico,nota,pulso_cm,cintura_cm,abdomen_cm,quadril_cm,busto_cm,torax_cm,coxas_cm,bracos_cm"];
   for (const r of rows) {
     const fl = Object.keys(FLAGS).filter((k) => ((r.flags | 0) & FLAGS[k].bit)).join(";");
-    lines.push([r.day, r.weight_kg, r.calories, r.exercise_kcal || 0, r.exercise_src || "est", fl, q(r.note)].join(","));
+    lines.push([r.day, r.weight_kg, r.calories, r.exercise_kcal || 0, r.exercise_src || "est", fl, q(r.note), r.m_pulso ?? "", r.m_cintura ?? "", r.m_abdomen ?? "", r.m_quadril ?? "", r.m_busto ?? "", r.m_torax ?? "", r.m_coxas ?? "", r.m_bracos ?? ""].join(","));
   }
   const body = "\uFEFF" + lines.join("\n");
   secHeaders(res, false);

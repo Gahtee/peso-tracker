@@ -53,6 +53,15 @@ export function validWeight(w) {
   return n >= 20 && n <= 500;
 }
 
+// Medidas corporais em cm: aceitam decimais. Vazio/null/undefined = ausente (null).
+// Faixa ampla 5–300 cm cobre pulso (~15) até altura (~200).
+export function validCm(v) {
+  if (v === undefined || v === null || v === "") return null;
+  const n = Number(String(v).replace(",", "."));
+  if (!Number.isFinite(n) || n < 5 || n > 300) return undefined;
+  return Math.round(n * 10) / 10;
+}
+
 export function validCalories(c) {
   const n = Number(c);
   return Number.isInteger(n) && n >= 0 && n <= 30000;

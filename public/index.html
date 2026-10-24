@@ -41,6 +41,7 @@
     <nav class="side-nav" id="sidenav">
       <button data-view="overview" class="active"><i>◈</i><span class="txt">Visão geral</span></button>
       <button data-view="entries"><i>▤</i><span class="txt">Registros</span><span class="count" id="nav-count"></span></button>
+      <button data-view="measures"><i>◍</i><span class="txt">Medidas</span></button>
       <button data-view="compare"><i>◐</i><span class="txt">Antes / Depois</span></button>
       <button data-view="goal"><i>◎</i><span class="txt">Meta</span></button>
       <button data-view="forecast"><i>∴</i><span class="txt">Estimativa</span></button>
@@ -109,6 +110,40 @@
         </div>
       </div>
 
+      <!-- MEDIDAS -->
+<div id="view-measures" class="view hidden">
+  <div class="panel">
+    <div class="panel-head">
+      <div><p class="kicker">Corpo</p><h2>Medidas corporais</h2></div>
+    </div>
+    <div class="meas-grid">
+      <div class="meas-fig">
+        <svg id="meas-svg" viewBox="-20 0 260 400" role="img" aria-label="Boneco com pontos de medição">
+          <g class="body">
+            <circle cx="110" cy="36" r="20"/>
+            <path d="M110 56V74" stroke-width="12"/>
+            <path class="f" d="M78 82Q110 76 142 82L137 118Q131 140 132 158Q142 184 142 204L138 226H82L78 204Q78 184 88 158Q89 140 83 118Z"/>
+            <path d="M72 94L58 150L52 196" stroke-width="14"/>
+            <path d="M148 94L162 150L168 196" stroke-width="14"/>
+            <path d="M98 218L92 290L90 370" stroke-width="22"/>
+            <path d="M122 218L128 290L130 370" stroke-width="22"/>
+          </g>
+          <g id="meas-dots"></g>
+          <g id="meas-labels"></g>
+        </svg>
+      </div>
+      <div class="meas-side">
+        <div id="meas-detail" class="meas-detail"></div>
+        <div class="panel-sub" id="meas-chart-wrap">
+          <h3 id="meas-chart-title"></h3>
+          <canvas id="meas-chart" width="900" height="220"></canvas>
+        </div>
+        <div id="meas-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
       <!-- ANTES / DEPOIS -->
       <div id="view-compare" class="view hidden">
         <div class="panel">
@@ -138,6 +173,18 @@
           </div>
           <p id="g-err" class="err"></p>
           <div id="goal-box"></div>
+          <div class="cycle-box">
+            <p class="kicker">Medidas fixas (cm)</p>
+            <p class="muted small">Preenchidas uma vez — ficam salvas no perfil.</p>
+            <div class="row3">
+              <label class="lbl">Ombros — ombro a ombro<input id="fx-ombros" type="number" step="0.1" min="5" max="300" inputmode="decimal" placeholder="ex: 42"></label>
+              <label class="lbl">Braços — comprimento<input id="fx-braco" type="number" step="0.1" min="5" max="300" inputmode="decimal" placeholder="ex: 60"></label>
+              <label class="lbl">Pernas — comprimento<input id="fx-perna" type="number" step="0.1" min="5" max="300" inputmode="decimal" placeholder="ex: 85"></label>
+              <label class="lbl">Altura<input id="fx-altura" type="number" step="0.1" min="5" max="300" inputmode="decimal" placeholder="ex: 168"></label>
+              <label class="lbl">Gancho (cavalo)<input id="fx-gancho" type="number" step="0.1" min="5" max="300" inputmode="decimal" placeholder="ex: 76"></label>
+              <label class="lbl">Distância entre mamilos<input id="fx-busto-gap" type="number" step="0.1" min="5" max="300" inputmode="decimal" placeholder="ex: 19"></label>
+            </div>
+          </div>
           <div class="cycle-box">
             <label class="flag"><input type="checkbox" id="c-on"><span>Acompanhar ciclo menstrual</span></label>
             <div class="row3" id="c-fields">
@@ -207,6 +254,16 @@
       <label class="lbl">Exercício de ontem (kcal)<input id="f-ex" type="number" step="1" min="0" max="10000" inputmode="numeric" placeholder="0"></label>
       <label class="lbl">Medida do exercício<select id="f-exsrc"><option value="est">Estimativa</option><option value="dev">Relógio/app</option><option value="nao">Não sei / chute</option></select></label>
     </div>
+    <fieldset class="flags meas-fields"><legend>Medidas (cm, opcionais) <span class="muted">— 1x por semana basta</span></legend>
+      <label class="lbl">Pulso<input id="f-m-pulso" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Cintura<input id="f-m-cintura" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Abdômen<input id="f-m-abdomen" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Quadril<input id="f-m-quadril" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Busto<input id="f-m-busto" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Tórax<input id="f-m-torax" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Coxas<input id="f-m-coxas" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Braços<input id="f-m-bracos" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+    </fieldset>
     <p class="muted small">O gasto do treino nunca é exato (relógio erra ~25%). Estimativas e chutes alargam a margem de erro da TMB; medida de aparelho, não. Em branco = 0 (subestima o gasto de quem treina sem anotar).</p>
     <label class="lbl">Nota<input id="f-note" maxlength="500" placeholder="Como foi o dia? (opcional)"></label>
     <label class="lbl">Foto / vídeo da pesagem <span class="muted">— jpg png webp gif mp4 webm, 15 MB</span>
@@ -232,6 +289,16 @@
       <label class="lbl">Exercício de ontem (kcal)<input id="e-ex" type="number" step="1" min="0" max="10000"></label>
       <label class="lbl">Medida<select id="e-exsrc"><option value="est">Estimativa</option><option value="dev">Relógio/app</option><option value="nao">Não sei / chute</option></select></label>
     </div>
+    <fieldset class="flags meas-fields"><legend>Medidas (cm, opcionais)</legend>
+      <label class="lbl">Pulso<input id="e-m-pulso" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Cintura<input id="e-m-cintura" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Abdômen<input id="e-m-abdomen" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Quadril<input id="e-m-quadril" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Busto<input id="e-m-busto" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Tórax<input id="e-m-torax" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Coxas<input id="e-m-coxas" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+      <label class="lbl">Braços<input id="e-m-bracos" type="number" step="0.1" min="5" max="300" inputmode="decimal"></label>
+    </fieldset>
     <label class="lbl">Nota<input id="e-note" maxlength="500"></label>
     <fieldset id="e-flags" class="flags"><legend>Dia atípico?</legend></fieldset>
     <p id="e-err" class="err"></p>

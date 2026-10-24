@@ -5,11 +5,45 @@ import { db, audit } from "../db.js";
 import { UPLOAD_DIR } from "../config.js";
 import { json, secHeaders } from "../http.js";
 import { readBody } from "./helpers.js";
-import { parseFlags, validCalories, validDay, validExercise, validExerciseSrc, validWeight } from "../validation.js";
+import { parseFlags, validCalories, validCm, validDay, validExercise, validExerciseSrc, validWeight } from "../validation.js";
 import { EXT, parseMultipart } from "../media.js";
 
+// Medidas variáveis (cm, opcionais) — chaves da API -> colunas de entries
+export const MEASURE_KEYS = {
+  pulso: "m_pulso",
+  cintura: "m_cintura",
+  abdomen: "m_abdomen",
+  quadril: "m_quadril",
+  busto: "m_busto",
+  torax: "m_torax",
+  coxas: "m_coxas",
+  bracos: "m_bracos",
+};
+
+export function readMeasures(body) {
+  const src = body.medidas ?? {};
+  const out = {};
+  for (const [k, col] of Object.entries(MEASURE_KEYS)) {
+    const raw = src[k] !== undefined ? src[k] : body[col] ?? body["m_" + k];
+    const v = validCm(raw);
+    if (v === undefined) return { error: `medida "${k}" inválida (5–300 cm)` };
+    out[col] = v;
+  }
+  return { out };
+}
+
+function measuresToApi(r) {
+  const m = {};
+  for (const [k, col] of Object.entries(MEASURE_KEYS)) m[k] = r[col] ?? null;
+  return m;
+}
+
+const MEASURE_COLS = "m_pulso, m_cintura, m_abdomen, m_quadril, m_busto, m_torax, m_coxas, m_bracos";
+const MEASURE_PH = Object.values(MEASURE_KEYS).map(() => "?").join(",");
+const MEASURE_VALS = (m) => Object.values(MEASURE_KEYS).map((col) => m[col]);
+
 export function handleListEntries(res, sess) {
-  const rows = db.prepare("SELECT id, day, weight_kg, calories, exercise_kcal, exercise_src, flags, note FROM entries WHERE user_id=? ORDER BY day DESC LIMIT 500").all(sess.user_id);
+  const rows = db.prepare(`SELECT id, day, weight_kg, calories, exercise_kcal, exercise_src, flags, note, ${MEASURE_COLS} FROM entries WHERE user_id=? ORDER BY day DESC LIMIT 500`).all(sess.user_id);
   const ids = rows.map((r) => r.id);
   let mediaByEntry = {};
   if (ids.length) {
@@ -17,7 +51,7 @@ export function handleListEntries(res, sess) {
     const meds = db.prepare(`SELECT id, entry_id, stored, mime, size, created_at FROM media WHERE entry_id IN (${ph}) ORDER BY created_at`).all(...ids);
     for (const x of meds) { (mediaByEntry[x.entry_id] ||= []).push(x); }
   }
-  return json(res, 200, { entries: rows.map((r) => ({ ...r, media: mediaByEntry[r.id] || [] })) });
+  return json(res, 200, { entries: rows.map((r) => ({ ...r, medidas: measuresToApi(r), media: mediaByEntry[r.id] || [] })) });
 }
 
 export async function handleCreateEntry(req, res, sess) {
@@ -30,13 +64,15 @@ export async function handleCreateEntry(req, res, sess) {
   const exSrc = validExerciseSrc(body.exercise_src);
   const flags = parseFlags(body.flags ?? body.flagsKeys);
   const note = String(body.note || "").slice(0, 500);
+  const meas = readMeasures(body);
   if (!validDay(day)) return json(res, 400, { error: "data inválida (use datas até hoje)" });
   if (!validWeight(weight)) return json(res, 400, { error: "peso inválido (20–500 kg)" });
   if (!validCalories(calories)) return json(res, 400, { error: "calorias inválidas (0–30000)" });
   if (exercise === null) return json(res, 400, { error: "exercício inválido (0–10000 kcal)" });
+  if (meas.error) return json(res, 400, { error: meas.error });
   const now = Date.now();
   try {
-    const r = db.prepare("INSERT INTO entries(user_id,day,weight_kg,calories,exercise_kcal,exercise_src,flags,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run(sess.user_id, day, weight, calories, exercise, exSrc, flags, note, now, now);
+    const r = db.prepare(`INSERT INTO entries(user_id,day,weight_kg,calories,exercise_kcal,exercise_src,flags,note,${MEASURE_COLS},created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,${MEASURE_PH},?,?)`).run(sess.user_id, day, weight, calories, exercise, exSrc, flags, note, ...MEASURE_VALS(meas.out), now, now);
     return json(res, 201, { ok: true, id: Number(r.lastInsertRowid) });
   } catch { return json(res, 409, { error: "já existe registro neste dia — edite o existente" }); }
 }
@@ -49,10 +85,12 @@ export async function handleUpdateEntry(req, res, sess, id) {
   const exSrc = validExerciseSrc(body.exercise_src);
   const flags = parseFlags(body.flags ?? body.flagsKeys);
   const note = String(body.note || "").slice(0, 500);
+  const meas = readMeasures(body);
   if (!validWeight(weight)) return json(res, 400, { error: "peso inválido" });
   if (!validCalories(calories)) return json(res, 400, { error: "calorias inválidas" });
   if (exercise === null) return json(res, 400, { error: "exercício inválido (0–10000 kcal)" });
-  const r = db.prepare("UPDATE entries SET weight_kg=?, calories=?, exercise_kcal=?, exercise_src=?, flags=?, note=?, updated_at=? WHERE id=? AND user_id=?").run(weight, calories, exercise, exSrc, flags, note, Date.now(), id, sess.user_id);
+  if (meas.error) return json(res, 400, { error: meas.error });
+  const r = db.prepare(`UPDATE entries SET weight_kg=?, calories=?, exercise_kcal=?, exercise_src=?, flags=?, note=?, ${Object.values(MEASURE_KEYS).map((c) => c + "=?").join(",")}, updated_at=? WHERE id=? AND user_id=?`).run(weight, calories, exercise, exSrc, flags, note, ...MEASURE_VALS(meas.out), Date.now(), id, sess.user_id);
   if (r.changes === 0) return json(res, 404, { error: "não encontrado" });
   return json(res, 200, { ok: true });
 }

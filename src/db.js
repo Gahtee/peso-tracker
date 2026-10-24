@@ -92,6 +92,21 @@ for (const sql of [
   "ALTER TABLE profile ADD COLUMN cycle_enabled INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE profile ADD COLUMN cycle_last TEXT",
   "ALTER TABLE profile ADD COLUMN cycle_len INTEGER NOT NULL DEFAULT 28",
+  // medidas corporais fixas (cm, perfil) + variáveis (cm, por registro)
+  "ALTER TABLE profile ADD COLUMN fix_ombros REAL",
+  "ALTER TABLE profile ADD COLUMN fix_braco_len REAL",
+  "ALTER TABLE profile ADD COLUMN fix_perna_len REAL",
+  "ALTER TABLE profile ADD COLUMN fix_altura REAL",
+  "ALTER TABLE profile ADD COLUMN fix_gancho REAL",
+  "ALTER TABLE profile ADD COLUMN fix_busto_gap REAL",
+  "ALTER TABLE entries ADD COLUMN m_pulso REAL",
+  "ALTER TABLE entries ADD COLUMN m_cintura REAL",
+  "ALTER TABLE entries ADD COLUMN m_abdomen REAL",
+  "ALTER TABLE entries ADD COLUMN m_quadril REAL",
+  "ALTER TABLE entries ADD COLUMN m_busto REAL",
+  "ALTER TABLE entries ADD COLUMN m_torax REAL",
+  "ALTER TABLE entries ADD COLUMN m_coxas REAL",
+  "ALTER TABLE entries ADD COLUMN m_bracos REAL",
 ]) {
   try { db.exec(sql); } catch {}
 }
